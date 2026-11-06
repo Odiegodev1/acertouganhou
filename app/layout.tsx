@@ -3,7 +3,7 @@ import { Geist, Geist_Mono, Sora } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Toaster } from "sonner";
-
+import { Analytics } from "@vercel/analytics/next"
 const sora = Sora({
   subsets: ["latin"],
   variable: "--font-sans",
@@ -58,6 +58,7 @@ export default function RootLayout({
         )}
       >
         <Toaster />
+        <Analytics />
         {children}
       </body>
     </html>
