@@ -57,7 +57,7 @@ export function DropdownMenuDemo({name}:props) {
         <DropdownMenuGroup>
           <DropdownMenuItem variant="destructive">
             <TrashIcon />
-            Sair da conta
+            Sair da conta ?
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenu>
