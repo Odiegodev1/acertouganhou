@@ -15,6 +15,8 @@ import BadgeCinco from "@/public/Badgecinco.png";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { DrawerLogin } from "./DraweLogin";
+import { DraweCadastro } from "./Drawecadastro";
 
 type PrizeItem = {
   id: number;
@@ -89,7 +91,7 @@ export function HeaderComponents() {
             alt="Acertou Ganhou"
             priority
             className={cn(
-              "h-auto w-[115px] object-contain",
+              "h-auto w-[100px] object-contain",
               "transition-opacity duration-200",
               "hover:opacity-90",
               "sm:w-[145px]",
@@ -99,19 +101,10 @@ export function HeaderComponents() {
         </Link>
 
         {/* BOTÃO ENTRAR */}
-        <Button
-          className={cn(
-            "h-9 rounded-lg px-4",
-            "bg-[#c8f31d] text-[#101409]",
-            "text-xs font-bold",
-            "transition-colors duration-200",
-            "hover:bg-[#d6ff45]",
-            "sm:h-10 sm:px-5 sm:text-sm"
-          )}
-        >
-          <LogIn className="mr-2 size-4" />
-          ENTRAR
-        </Button>
+       <div className="flex items-center  gap-1">
+       <DrawerLogin />
+      <DraweCadastro />
+       </div>
       </div>
 
       {/* NAVEGAÇÃO DE PRÊMIOS */}
