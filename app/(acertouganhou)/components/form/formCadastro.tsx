@@ -160,7 +160,7 @@ async function onSubmit(data:FormSchemaCadastro) {
                 </Field>
               )}
             />
-             <Button type="submit" className="h-13 text-lg font-semibold bg-lime-600">Entrar</Button>
+             <Button type="submit" className="h-13 text-lg font-semibold bg-lime-600">Criar conta</Button>
           </FieldGroup>
 
         
