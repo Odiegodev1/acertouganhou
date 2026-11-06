@@ -1,6 +1,7 @@
 import z from "zod"
 
 export const formSchemaCadastro = z.object({
+  name: z.string().min(1, "O nome e obrigátorio").max(52, "erro max."),
     Gmail: z
       .string()
       .min(5, "gmail obrigatorio")

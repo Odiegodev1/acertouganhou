@@ -31,11 +31,17 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { formSchemaEntrar, FormSchemaEntrar } from "./schema/formentraschema"
-import { Lock, Search, User } from "lucide-react"
+import { Lock, Mail, Search, User } from "lucide-react"
+import { CreateUser } from "./actions/CreateUser";
+import { redirect } from "next/navigation";
+import { useRouter } from "next/navigation"
+interface FormEntrarProps {
+  onClose: () => void
+}
 
+export function FormEntrar({ onClose }: FormEntrarProps) {
+  const router = useRouter()
 
-
-export function FormEntrar() {
   const form = useForm<FormSchemaEntrar>({
     resolver: zodResolver(formSchemaEntrar),
     defaultValues: {
@@ -44,10 +50,27 @@ export function FormEntrar() {
     },
   })
 
-async function onSubmit(data:FormSchemaEntrar) {
-    console.log("#entra : ", data)
-    
-}
+  async function onSubmit(data: FormSchemaEntrar) {
+    try {
+      const res = await CreateUser(data)
+
+      console.log("Resposta da action:", res)
+      console.log("Sucesso:", res?.success)
+
+      if (res?.success === true) {
+        toast.success("Login realizado com sucesso!")
+
+        onClose() // Fecha o Drawer
+
+        router.refresh()
+      } else {
+        toast.error("Não foi possível entrar.")
+      }
+    } catch (error) {
+      console.error("Erro no login:", error)
+      toast.error("Erro ao realizar login.")
+    }
+  }
 
   return (
   
@@ -68,7 +91,7 @@ async function onSubmit(data:FormSchemaEntrar) {
         type="email"
      />
       <InputGroupAddon>
-        <User />
+        <Mail />
       </InputGroupAddon>
       
     </InputGroup>

@@ -31,8 +31,10 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 
-import { IdCard, Lock, Phone, Search, User } from "lucide-react"
+import { IdCard, Lock, Mail, Phone, Search, User } from "lucide-react"
 import { formSchemaCadastro, FormSchemaCadastro } from "./schema/formSchemaCadastro"
+import { CreateUser } from "./actions/CreateUser";
+import { CreateCadastro } from "./actions/createcadastro";
 
 
 
@@ -40,6 +42,7 @@ export function FormCadastro() {
   const form = useForm<FormSchemaCadastro>({
     resolver: zodResolver(formSchemaCadastro),
     defaultValues: {
+      name: "",
       Gmail: "",
       Cpf: "",
       Telefone: "",
@@ -48,7 +51,9 @@ export function FormCadastro() {
   })
 
 async function onSubmit(data:FormSchemaCadastro) {
-    console.log("#cadastro : ", data)
+    console.log("#cadastro : ")
+    const res = await CreateCadastro(data)
+    console.log("resposta do CreateUser: ", res)
     
 }
 
@@ -56,6 +61,32 @@ async function onSubmit(data:FormSchemaCadastro) {
   
         <form id="form-rhf-demo" onSubmit={form.handleSubmit(onSubmit)}>
           <FieldGroup className="gap-4">
+             <Controller
+              name="name"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <Field data-invalid={fieldState.invalid}>
+                  <FieldLabel htmlFor="form-rhf-demo-title">
+                    Nome
+                  </FieldLabel>
+                
+                   <InputGroup className="max-w-full">
+      <InputGroupInput
+        {...field}
+  
+        placeholder="Seu nome"
+     />
+      <InputGroupAddon>
+        <User />
+      </InputGroupAddon>
+      
+    </InputGroup>
+                  {fieldState.invalid && (
+                    <FieldError errors={[fieldState.error]} />
+                  )}
+                </Field>
+              )}
+            />
             <Controller
               name="Gmail"
               control={form.control}
@@ -72,7 +103,7 @@ async function onSubmit(data:FormSchemaCadastro) {
         placeholder="seu@email.com"
      />
       <InputGroupAddon>
-        <User />
+        <Mail />
       </InputGroupAddon>
       
     </InputGroup>

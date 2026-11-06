@@ -161,7 +161,7 @@ export function LaoyutPremios() {
                   <Badge
                     className="
                       absolute left-2 top-2
-                      border-0 bg-[#c8f31d]
+                      border-0 bg-lima
                       px-2 py-1
                       text-[9px] font-bold
                       text-[#101509]

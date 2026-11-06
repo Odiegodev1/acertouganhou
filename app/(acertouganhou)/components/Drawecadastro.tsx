@@ -18,13 +18,15 @@ import { FormEntrar } from "./form/formentrar"
 import { CircleX } from "lucide-react"
 import { cn } from "cn"
 import { FormCadastro } from "./form/formCadastro"
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export function DraweCadastro() {
 
-  
+  const isMobile = useIsMobile()
 
   return (
-    <Drawer >
+    <Drawer showSwipeHandle={isMobile}
+      swipeDirection={isMobile ? "down" : "right"}  >
     <DrawerTrigger render={   <Button
           className={cn(
             "h-9 w-22 rounded-2xl px-4",

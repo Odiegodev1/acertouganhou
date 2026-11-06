@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Sora } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { Toaster } from "sonner";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -56,6 +57,7 @@ export default function RootLayout({
           "bg-[#090c0a] text-white"
         )}
       >
+        <Toaster />
         {children}
       </body>
     </html>

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image, { StaticImageData } from "next/image";
 import Link from "next/link";
-import { ChevronRight, LogIn } from "lucide-react";
+import { Bell, ChevronRight, LogIn } from "lucide-react";
 
 import Logo from "@/public/logo.png";
 import BadgeIphone from "@/public/badgeiphone.png";
@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DrawerLogin } from "./DraweLogin";
 import { DraweCadastro } from "./Drawecadastro";
+import { auth } from "@/lib/auth";
+import { DropdownMenuDemo } from "./dropmenuavatar";
 
 type PrizeItem = {
   id: number;
@@ -64,9 +66,17 @@ const navItems: PrizeItem[] = [
   },
 ];
 
-export function HeaderComponents() {
+interface HeaderComponentsProps {
+  id?: string;
+  img?: string;
+  name?: string;
+  
+}
+export  function  HeaderComponents({img,id,name}: HeaderComponentsProps) {
   const [selectedPrize, setSelectedPrize] = useState(1);
-
+  function primieroletradonome(name: string){
+    return name.trim().charAt(0).toUpperCase();
+  }
   return (
     <header className="w-full bg-[#090c0a]">
 
@@ -102,8 +112,27 @@ export function HeaderComponents() {
 
         {/* BOTÃO ENTRAR */}
        <div className="flex items-center  gap-1">
-       <DrawerLogin />
-      <DraweCadastro />
+      {!id ? (
+        <>
+          <DrawerLogin />
+          <DraweCadastro />
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+             <div className="p-2 bg-accet border text-accent-foreground rounded-full overflow-hidden">
+                R$ 0,00
+             </div>
+
+             <div className="size-10 flex items-center justify-center border rounded-full ">
+              <Bell className="size-5" />
+             </div>
+            
+             <DropdownMenuDemo name={name as ""} />
+             
+          </div>
+        </>
+      )}
        </div>
       </div>
 
