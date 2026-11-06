@@ -35,10 +35,14 @@ import { IdCard, Lock, Mail, Phone, Search, User } from "lucide-react"
 import { formSchemaCadastro, FormSchemaCadastro } from "./schema/formSchemaCadastro"
 import { CreateUser } from "./actions/CreateUser";
 import { CreateCadastro } from "./actions/createcadastro";
+import { useRouter } from "next/navigation"
+interface CadastroFormProps {
+  onSuccess?: () => void;
+}
 
+export function CadastroForm({ onSuccess }: CadastroFormProps) {
+  const router = useRouter();
 
-
-export function FormCadastro() {
   const form = useForm<FormSchemaCadastro>({
     resolver: zodResolver(formSchemaCadastro),
     defaultValues: {
@@ -50,13 +54,32 @@ export function FormCadastro() {
     },
   })
 
-async function onSubmit(data:FormSchemaCadastro) {
-    console.log("#cadastro : ")
-    const res = await CreateCadastro(data)
-    console.log("resposta do CreateUser: ", res)
-    
-}
+  async function onSubmit(data: FormSchemaCadastro) {
+    try {
+      const result = await CreateCadastro(data);
 
+      if (!result.success) {
+        toast.error("Não foi possível cadastrar", {
+          description: result.error,
+        });
+        return;
+      }
+
+      toast.success("Cadastro realizado!", {
+        description: result.message,
+      });
+
+      // Fecha o modal
+      onSuccess?.();
+
+      // Atualiza a página atual sem navegar
+      router.refresh();
+    } catch {
+      toast.error("Erro inesperado", {
+        description: "Tente novamente.",
+      });
+    }
+  }
   return (
   
         <form id="form-rhf-demo" onSubmit={form.handleSubmit(onSubmit)}>
