@@ -15,6 +15,8 @@ import Cinco from "@/public/layoutcinco.png";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { sl } from "zod/v4/locales";
+import { DialogJogo } from "./DialogJogo";
 
 type PremiosItems = {
   id: string;
@@ -23,6 +25,7 @@ type PremiosItems = {
   nome: string;
   valor: number;
   destaque?: boolean;
+  time?: number
 };
 
 const PremioItem: PremiosItems[] = [
@@ -31,6 +34,7 @@ const PremioItem: PremiosItems[] = [
     img: Dois,
     tipo: "Prêmio via Pix",
     nome: "R$ 200 no Pix",
+    time: 5.0,
     valor: 2,
   },
   {
@@ -39,6 +43,7 @@ const PremioItem: PremiosItems[] = [
     tipo: "Tecnologia",
     nome: "iPhone 17 Pro",
     valor: 30,
+    time:10.0,
     destaque: true,
   },
   {
@@ -47,6 +52,7 @@ const PremioItem: PremiosItems[] = [
     tipo: "Games",
     nome: "PlayStation 5",
     valor: 12,
+    time:4.0
   },
   {
     id: "4",
@@ -54,6 +60,7 @@ const PremioItem: PremiosItems[] = [
     tipo: "Prêmio via Pix",
     nome: "R$ 1.000 no Pix",
     valor: 5,
+    time:3.0
   },
   {
     id: "5",
@@ -62,6 +69,7 @@ const PremioItem: PremiosItems[] = [
     nome: "R$ 5.000 no Pix",
     valor: 10,
     destaque: true,
+    time:15.0
   },
   {
     id: "6",
@@ -69,6 +77,7 @@ const PremioItem: PremiosItems[] = [
     tipo: "Tecnologia",
     nome: 'Smart TV 55"',
     valor: 20,
+    time:2.0
   },
 ];
 
@@ -78,7 +87,24 @@ const formatCurrency = (value: number) =>
     currency: "BRL",
   }).format(value);
 
-export function LaoyutPremios() {
+interface LaoyutPremiosProps {
+  slug? : string,
+  nome? : string,
+  desc? : string
+}
+
+export function LaoyutPremios({desc,nome,slug} : LaoyutPremiosProps) {
+
+  function SeparaPrimeiroNome(nome: string): string {
+    return nome.trim().split(" ")[0];
+}
+
+function SeparaSegundoNome(nome: string): string {
+  return nome.trim().split(" ")[2];
+}
+console.log(SeparaPrimeiroNome("Premio premiun"))
+console.log(SeparaSegundoNome("Premio premiun"))
+
   return (
     <section className="w-full  py-6 sm:py-10">
       <div className="mx-auto w-full max-w-7xl px-3 sm:px-6 lg:px-8">
@@ -91,14 +117,14 @@ export function LaoyutPremios() {
               <Sparkles className="size-4 text-[#c8f31d]" />
 
               <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#c8f31d] sm:text-xs">
-                Acertou Ganhou
+                {slug || "Acertou Ganhou"}
               </span>
             </div>
 
             <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl lg:text-3xl">
-              Prêmios{" "}
+            {SeparaPrimeiroNome(nome || "") || "Prêmios"} {" "}
               <span className="text-[#c8f31d]">
-                Premium
+              {SeparaSegundoNome(nome || "") || "Premium"} 
               </span>
             </h2>
 
@@ -206,26 +232,7 @@ export function LaoyutPremios() {
                 </div>
 
                 {/* BOTÃO JOGAR */}
-                <Button
-                  className="
-                    h-10 w-full rounded-xl
-                    bg-[#c8f31d]
-                     text-xs font-bold
-                    text-[#101509]
-                    transition-all duration-200
-                    hover:bg-[#d8ff52]
-                    active:scale-[0.98]
-                    
-                    
-                    
-                  "
-                >
-                  <Gamepad2 className="mr-1.5 size-4 sm:mr-2" />
-
-                  Jogar agora
-
-                 
-                </Button>
+               <DialogJogo id={premio.id} time={premio.time  ||  5.0} nome={premio.nome} tipo={premio.tipo} valor={premio.valor} img={premio.img }   />
               </div>
             </Card>
           ))}

@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TrashIcon } from "lucide-react";
+import { DropdownSair } from "./DropdownSair";
 interface props {
     name:string
 }
@@ -55,10 +56,7 @@ export function DropdownMenuDemo({name}:props) {
       
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem variant="destructive">
-            <TrashIcon />
-            Sair da conta ?
-          </DropdownMenuItem>
+          <DropdownSair />
         </DropdownMenuGroup>
       </DropdownMenu>
     </DropdownMenuTrigger>
