@@ -59,7 +59,7 @@ export default async function Carteira() {
   const session = await auth();
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-2 bg-[#0c110d] text-white">
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-2  text-white">
       <HeaderComponents
         banner={true}
         id={session?.user?.id ?? ""}
