@@ -1,54 +1,63 @@
-import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Sora } from "next/font/google";
-import "./globals.css";
-import { cn } from "@/lib/utils";
+import type { Metadata, Viewport } from "next"
+import { Geist_Mono, Sora } from "next/font/google"
 
 import { Analytics } from "@vercel/analytics/next"
-import { CustomToaster } from "./(acertouganhou)/components/custom-toaster";
+
+import "./globals.css"
+
+import { cn } from "@/lib/utils"
+
+import { CustomToaster } from "./(acertouganhou)/components/custom-toaster"
+
 const sora = Sora({
   subsets: ["latin"],
   variable: "--font-sans",
-});
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+  display: "swap",
+})
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
   subsets: ["latin"],
-});
+  variable: "--font-geist-mono",
+  display: "swap",
+})
 
 export const metadata: Metadata = {
-  title: "Acertou Ganhou",
-  description: "Escolha seu prêmio e participe dos desafios.",
+  title: {
+    default: "Acertou Ganhou",
+    template: "%s | Acertou Ganhou",
+  },
+
+  description:
+    "Escolha seu prêmio e participe dos desafios.",
+
+  applicationName: "Acertou Ganhou",
 
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Acertou Ganhou",
   },
-};
+}
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
   themeColor: "#090c0a",
-};
+}
 
 export default function RootLayout({
   children,
-}: LayoutProps<"/">) {
+}: Readonly<{
+  children: React.ReactNode
+}>) {
   return (
     <html
       lang="pt-BR"
       className={cn(
         "h-full bg-[#090c0a] antialiased",
-        geistSans.variable,
-        geistMono.variable,
         sora.variable,
+        geistMono.variable,
         "font-sans"
       )}
     >
@@ -58,10 +67,12 @@ export default function RootLayout({
           "bg-[#090c0a] text-white"
         )}
       >
-        <CustomToaster />
-        <Analytics />
         {children}
+
+        <CustomToaster />
+
+        <Analytics />
       </body>
     </html>
-  );
+  )
 }

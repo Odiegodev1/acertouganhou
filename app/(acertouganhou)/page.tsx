@@ -1,18 +1,72 @@
-import { auth } from "@/lib/auth";
-import { HeaderComponents } from "./components/HeaderComponents";
-import { InputPremio } from "./components/InputPremeio";
-import { LaoyutPremios } from "./components/LaoyutPremios";
-export const instant = false
-export default async function Page(){
-    const session = await auth()
-    
-    return(
-        <div className="flex  flex-col gap-2 w-full  mx-auto max-w-7xl  min-h-screen">
-      <HeaderComponents id={session?.user?.id as ""} img={session?.user?.image as ""} name={session?.user?.name as ""} />
-          <main className="p-4 space-y-10">
-             <InputPremio />
-             <LaoyutPremios />
-          </main>
+import { Suspense } from "react"
+
+import { auth } from "@/lib/auth"
+
+import { HeaderComponents } from "./components/HeaderComponents"
+import { InputPremio } from "./components/InputPremeio"
+import { LaoyutPremios } from "./components/LaoyutPremios"
+
+async function Header() {
+  const session = await auth()
+
+  return (
+    <HeaderComponents
+      id={session?.user?.id}
+      name={session?.user?.name ?? ""}
+      img={session?.user?.image ?? ""}
+    />
+  )
+}
+
+function HeaderSkeleton() {
+  return (
+    <div className="w-full bg-[#090c0a] px-4 py-4">
+      <div className="mx-auto flex max-w-7xl items-center justify-between">
+        <div className="h-10 w-32 animate-pulse rounded-lg bg-white/10" />
+
+        <div className="h-10 w-28 animate-pulse rounded-full bg-white/10" />
+      </div>
+    </div>
+  )
+}
+
+function PremiosSkeleton() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div
+          key={index}
+          className="overflow-hidden rounded-2xl border border-white/10 bg-[#111612]"
+        >
+          <div className="aspect-square animate-pulse bg-white/5" />
+
+          <div className="space-y-3 p-4">
+            <div className="h-4 w-3/4 animate-pulse rounded bg-white/10" />
+
+            <div className="h-4 w-1/2 animate-pulse rounded bg-white/5" />
+
+            <div className="h-10 animate-pulse rounded-xl bg-[#C8F31D]/10" />
+          </div>
         </div>
-    )
+      ))}
+    </div>
+  )
+}
+
+export default function Page() {
+  return (
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-2">
+      <Suspense fallback={<HeaderSkeleton />}>
+        <Header />
+      </Suspense>
+
+      <main className="space-y-10 p-4">
+        <InputPremio />
+
+        <Suspense fallback={<PremiosSkeleton />}>
+          <LaoyutPremios />
+        </Suspense>
+      </main>
+    </div>
+  )
 }

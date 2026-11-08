@@ -1,16 +1,16 @@
-import { MobileNavbar } from "./components/mobile-navbar";
+import { MobileNavbar } from "./components/mobile-navbar"
 
+interface AcertouGanhouLayoutProps {
+  children: React.ReactNode
+}
 
 export default function AcertouGanhouLayout({
   children,
-}: {
-  children: React.ReactNode;
-}) {
+}: AcertouGanhouLayoutProps) {
   return (
     <div className="dark min-h-dvh bg-[#080b09] text-white">
       <div className="flex min-h-dvh flex-col">
-
-        {/* Conteúdo principal */}
+        {/* CONTEÚDO PRINCIPAL */}
         <main
           className="
             w-full flex-1
@@ -21,10 +21,9 @@ export default function AcertouGanhouLayout({
           {children}
         </main>
 
-        {/* Navbar inferior — somente mobile */}
+        {/* NAVBAR MOBILE */}
         <MobileNavbar />
-
       </div>
     </div>
-  );
+  )
 }
