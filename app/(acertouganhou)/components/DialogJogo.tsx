@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { getGame } from "./form/actions/game/get-game"
 import { startGame } from "./form/actions/game/start-game"
 import { stopGame } from "./form/actions/game/stop-game"
+import { notifyWalletUpdated } from "@/lib/wallet-events"
 
 
 
@@ -199,7 +200,7 @@ export function DialogJogo({
         setGamePhase("ready")
         return
       }
-
+      notifyWalletUpdated()
       attemptIdRef.current = response.attemptId
       speedFactorRef.current = response.speedFactor
 
@@ -266,6 +267,9 @@ export function DialogJogo({
         })
 
         return
+      }
+      if (response.balance !== null) {
+        notifyWalletUpdated()
       }
 
       setElapsedMs(response.elapsedMs)
