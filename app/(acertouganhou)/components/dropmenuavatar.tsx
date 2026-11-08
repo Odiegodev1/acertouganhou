@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { TrashIcon } from "lucide-react";
 import { DropdownSair } from "./DropdownSair";
+import { redirect } from "next/navigation";
 interface props {
     name:string
 }
@@ -32,19 +33,19 @@ export function DropdownMenuDemo({name}:props) {
       <DropdownMenu className="w-60" placement="bottom start">
         <DropdownMenuGroup className="space-y-1">
          
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => redirect("/perfil")}>
             Meu perfil
             
           </DropdownMenuItem>
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => redirect("/carteira")}>
             Minha carteira
             
           </DropdownMenuItem>
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => redirect("/premios")}>
             Lances
             
           </DropdownMenuItem>
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => redirect("/notificacao")}>
             Notificação
             
           </DropdownMenuItem>
