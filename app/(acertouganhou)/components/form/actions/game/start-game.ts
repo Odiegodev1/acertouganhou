@@ -1,7 +1,7 @@
 "use server"
 
 import { auth } from "@/lib/auth"
-import prisma  from "@/lib/prisma"
+import prisma from "@/lib/prisma"
 import { Prisma } from "@/lib/generated/prisma"
 
 export async function startGame(prizeId: string) {
@@ -12,6 +12,14 @@ export async function startGame(prizeId: string) {
       success: false as const,
       error: "Faça login para jogar.",
       code: "UNAUTHORIZED",
+    }
+  }
+
+  if (!prizeId?.trim()) {
+    return {
+      success: false as const,
+      error: "Prêmio inválido.",
+      code: "INVALID_PRIZE",
     }
   }
 
@@ -32,7 +40,9 @@ export async function startGame(prizeId: string) {
         }
 
         const prize = await tx.prize.findUnique({
-          where: { id: prizeId },
+          where: {
+            id: prizeId,
+          },
         })
 
         if (!prize || !prize.active || prize.stock <= 0) {
@@ -100,7 +110,8 @@ export async function startGame(prizeId: string) {
         }
       },
       {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        isolationLevel:
+          Prisma.TransactionIsolationLevel.Serializable,
       }
     )
 
@@ -121,30 +132,23 @@ export async function startGame(prizeId: string) {
     }
 
     if (error instanceof Error) {
-      if (error.message === "INSUFFICIENT_BALANCE") {
-        return {
-          success: false as const,
-          error: "Saldo fictício insuficiente.",
-          code: "INSUFFICIENT_BALANCE",
-        }
+      const errors: Record<string, string> = {
+        INSUFFICIENT_BALANCE: "Saldo fictício insuficiente.",
+        ACTIVE_GAME: "Você já possui uma tentativa em andamento.",
+        PRIZE_UNAVAILABLE: "Prêmio indisponível.",
+        INVALID_CONFIG: "Configuração do prêmio inválida.",
       }
 
-      if (error.message === "ACTIVE_GAME") {
+      if (errors[error.message]) {
         return {
           success: false as const,
-          error: "Você já possui uma tentativa em andamento.",
-          code: "ACTIVE_GAME",
-        }
-      }
-
-      if (error.message === "PRIZE_UNAVAILABLE") {
-        return {
-          success: false as const,
-          error: "Prêmio indisponível.",
-          code: "PRIZE_UNAVAILABLE",
+          error: errors[error.message],
+          code: error.message,
         }
       }
     }
+
+    console.error("Erro ao iniciar jogo:", error)
 
     return {
       success: false as const,

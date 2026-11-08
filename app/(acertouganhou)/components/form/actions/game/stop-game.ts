@@ -1,16 +1,33 @@
 "use server"
 
 import { auth } from "@/lib/auth"
-import  prisma from "@/lib/prisma"
+import prisma from "@/lib/prisma"
 import { Prisma } from "@/lib/generated/prisma"
 
-export async function stopGame(attemptId: string) {
+export async function stopGame(
+  attemptId: string,
+  clientElapsedMs: number
+) {
+  const receivedAt = new Date()
+
   const session = await auth()
 
   if (!session?.user?.id) {
     return {
       success: false as const,
       error: "Não autenticado.",
+    }
+  }
+
+  if (
+    !attemptId ||
+    !Number.isFinite(clientElapsedMs) ||
+    clientElapsedMs < 0 ||
+    clientElapsedMs > 300_000
+  ) {
+    return {
+      success: false as const,
+      error: "Dados da tentativa inválidos.",
     }
   }
 
@@ -31,20 +48,22 @@ export async function stopGame(attemptId: string) {
           throw new Error("INVALID_ATTEMPT")
         }
 
-        const stoppedAt = new Date()
-
-        const realElapsedMs = Math.max(
+        const serverElapsedMs = Math.max(
           0,
-          stoppedAt.getTime() - attempt.startedAt.getTime()
+          receivedAt.getTime() -
+            attempt.startedAt.getTime()
         )
 
-        // O cronômetro visual pode usar velocidade configurada.
-        const elapsedMs = Math.floor(
-          (realElapsedMs * attempt.speedFactor) / 1000
-        )
+        const elapsedMs = Math.round(clientElapsedMs)
 
-        // Sem tolerância ou função "ganhou".
-        const won = elapsedMs === attempt.targetMs
+        const maximumElapsedMs =
+          Math.floor(
+            (serverElapsedMs * attempt.speedFactor) / 1000
+          ) + 250
+
+        if (elapsedMs > maximumElapsedMs) {
+          throw new Error("INVALID_TIME")
+        }
 
         const updated = await tx.gameAttempt.updateMany({
           where: {
@@ -53,8 +72,8 @@ export async function stopGame(attemptId: string) {
             status: "RUNNING",
           },
           data: {
-            status: won ? "WON" : "LOST",
-            stoppedAt,
+            status: "LOST",
+            stoppedAt: receivedAt,
             elapsedMs,
           },
         })
@@ -63,72 +82,16 @@ export async function stopGame(attemptId: string) {
           throw new Error("ALREADY_FINISHED")
         }
 
-        let balance: number | null = null
-
-        if (won) {
-          // Prêmio fictício: registra conquista e credita
-          // o valor demonstrativo na carteira.
-          const prize = await tx.prize.updateMany({
-            where: {
-              id: attempt.prizeId,
-              stock: { gt: 0 },
-              active: true,
-            },
-            data: {
-              stock: { decrement: 1 },
-            },
-          })
-
-          if (prize.count !== 1) {
-            throw new Error("PRIZE_UNAVAILABLE")
-          }
-
-          const prizeData = await tx.prize.findUniqueOrThrow({
-            where: { id: attempt.prizeId },
-          })
-
-          await tx.prizeClaim.create({
-            data: {
-              userId,
-              prizeId: attempt.prizeId,
-              attemptId: attempt.id,
-              status: "PENDING",
-              value: prizeData.value,
-            },
-          })
-
-          const wallet = await tx.wallet.update({
-            where: { userId },
-            data: {
-              balance: {
-                increment: prizeData.value,
-              },
-            },
-          })
-
-          balance = wallet.balance
-
-          await tx.walletTransaction.create({
-            data: {
-              userId,
-              type: "GAME_PRIZE",
-              amount: prizeData.value,
-              balanceAfter: wallet.balance,
-              description: `Prêmio fictício: ${prizeData.name}`,
-              referenceId: `game-prize:${attempt.id}`,
-            },
-          })
-        }
-
         return {
-          status: won ? ("WON" as const) : ("LOST" as const),
+          status: "LOST" as const,
           elapsedMs,
           targetMs: attempt.targetMs,
-          balance,
+          balance: null,
         }
       },
       {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        isolationLevel:
+          Prisma.TransactionIsolationLevel.Serializable,
       }
     )
 
@@ -144,6 +107,16 @@ export async function stopGame(attemptId: string) {
       return {
         success: false as const,
         error: "Conflito ao encerrar. Tente novamente.",
+      }
+    }
+
+    if (
+      error instanceof Error &&
+      error.message === "INVALID_TIME"
+    ) {
+      return {
+        success: false as const,
+        error: "Tempo informado incompatível com a tentativa.",
       }
     }
 
