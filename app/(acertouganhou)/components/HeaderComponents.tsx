@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image, { StaticImageData } from "next/image";
 import Link from "next/link";
 import { Bell, ChevronRight, LogIn } from "lucide-react";
@@ -19,6 +19,8 @@ import { DrawerLogin } from "./DraweLogin";
 import { DraweCadastro } from "./Drawecadastro";
 import { auth } from "@/lib/auth";
 import { DropdownMenuDemo } from "./dropmenuavatar";
+import { DialogDeposito } from "./draweDeposito";
+import { getWallet } from "./form/actions/wallet/get-wallet";
 
 type PrizeItem = {
   id: number;
@@ -76,9 +78,30 @@ interface HeaderComponentsProps {
   
 }
 export  function  HeaderComponents({img,id,name,banner}: HeaderComponentsProps) {
+  const [depositOpen, setDepositOpen] = useState(false)
+const [balance, setBalance] = useState(0)
+
+const loadData = useCallback(async () => {
+  if (!id) return
+
+  try {
+    const result = await getWallet()
+
+    if (result.success) {
+      setBalance(result.balance)
+    }
+  } catch (error) {
+    console.error("Erro ao carregar saldo:", error)
+  }
+}, [id])
+
+useEffect(() => {
+  void loadData()
+}, [loadData])
   const [selectedPrize, setSelectedPrize] = useState(1);
   function primieroletradonome(name: string){
     return name.trim().charAt(0).toUpperCase();
+    
   }
   return (
     <header className="w-full bg-[#090c0a]">
@@ -123,9 +146,8 @@ export  function  HeaderComponents({img,id,name,banner}: HeaderComponentsProps) 
       ) : (
         <>
           <div className="flex items-center gap-2">
-             <div className="p-2 bg-accet border text-accent-foreground rounded-full overflow-hidden">
-                R$ 0,00
-             </div>
+          <DialogDeposito
+/>
 
              <div className="size-10 flex items-center justify-center border rounded-full ">
               <Bell className="size-5" />

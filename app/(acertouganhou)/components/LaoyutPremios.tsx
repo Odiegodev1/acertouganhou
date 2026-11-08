@@ -1,118 +1,115 @@
-import Image, { StaticImageData } from "next/image";
+import Image, { type StaticImageData } from "next/image"
+
 import {
-  ArrowUpRight,
-  Gamepad2,
   Sparkles,
-} from "lucide-react";
+  Clock3,
+  Trophy,
+} from "lucide-react"
 
-import Iphone from "@/public/layoutiphone.png";
-import Tv from "@/public/layouttv.png";
-import Play from "@/public/layoutplay.png";
-import Dois from "@/public/layoutdois.png";
-import Mil from "@/public/layoutmil.png";
-import Cinco from "@/public/layoutcinco.png";
+import Iphone from "@/public/layoutiphone.png"
+import Tv from "@/public/layouttv.png"
+import Play from "@/public/layoutplay.png"
+import Dois from "@/public/layoutdois.png"
+import Mil from "@/public/layoutmil.png"
+import Cinco from "@/public/layoutcinco.png"
 
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { sl } from "zod/v4/locales";
-import { DialogJogo } from "./DialogJogo";
+import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 
-type PremiosItems = {
-  id: string;
-  img: StaticImageData;
-  tipo: string;
-  nome: string;
-  valor: number;
-  destaque?: boolean;
-  time?: number
-};
+import prisma  from "@/lib/prisma"
+import { DialogJogo } from "./DialogJogo"
 
-const PremioItem: PremiosItems[] = [
-  {
-    id: "1",
+type PremioVisual = {
+  img: StaticImageData
+  tipo: string
+  destaque?: boolean
+}
+
+const premioVisual: Record<string, PremioVisual> = {
+  "1": {
     img: Dois,
     tipo: "Prêmio via Pix",
-    nome: "R$ 200 no Pix",
-    time: 5.0,
-    valor: 2,
   },
-  {
-    id: "2",
+
+  "2": {
     img: Iphone,
     tipo: "Tecnologia",
-    nome: "iPhone 17 Pro",
-    valor: 30,
-    time:10.0,
     destaque: true,
   },
-  {
-    id: "3",
+
+  "3": {
     img: Play,
     tipo: "Games",
-    nome: "PlayStation 5",
-    valor: 12,
-    time:4.0
   },
-  {
-    id: "4",
+
+  "4": {
     img: Mil,
     tipo: "Prêmio via Pix",
-    nome: "R$ 1.000 no Pix",
-    valor: 5,
-    time:3.0
   },
-  {
-    id: "5",
+
+  "5": {
     img: Cinco,
     tipo: "Prêmio via Pix",
-    nome: "R$ 5.000 no Pix",
-    valor: 10,
     destaque: true,
-    time:15.0
   },
-  {
-    id: "6",
+
+  "6": {
     img: Tv,
     tipo: "Tecnologia",
-    nome: 'Smart TV 55"',
-    valor: 20,
-    time:2.0
   },
-];
+}
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("pt-BR", {
+function formatCurrency(valueInCents: number) {
+  return (valueInCents / 100).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
-  }).format(value);
+  })
+}
+
+function formatTime(milliseconds: number) {
+  return (milliseconds / 1000).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
 
 interface LaoyutPremiosProps {
-  slug? : string,
-  nome? : string,
-  desc? : string
+  slug?: string
+  nome?: string
+  desc?: string
 }
 
-export function LaoyutPremios({desc,nome,slug} : LaoyutPremiosProps) {
+export async function LaoyutPremios({
+  slug,
+  nome,
+  desc,
+}: LaoyutPremiosProps) {
+  const premios = await prisma.prize.findMany({
+    where: {
+      active: true,
+    },
+    orderBy: {
+      id: "asc",
+    },
+  })
 
-  function SeparaPrimeiroNome(nome: string): string {
-    return nome.trim().split(" ")[0];
-}
+  const titulo = nome?.trim() || "Prêmios Premium"
 
-function SeparaSegundoNome(nome: string): string {
-  return nome.trim().split(" ")[2];
-}
-console.log(SeparaPrimeiroNome("Premio premiun"))
-console.log(SeparaSegundoNome("Premio premiun"))
+  const partesTitulo = titulo.split(/\s+/)
+
+  const primeiraParte = partesTitulo[0] || "Prêmios"
+
+  const segundaParte =
+    partesTitulo.slice(1).join(" ") || "Premium"
 
   return (
-    <section className="w-full  py-6 sm:py-10">
+    <section className="w-full py-6 sm:py-10">
       <div className="mx-auto w-full max-w-7xl px-3 sm:px-6 lg:px-8">
 
         {/* CABEÇALHO */}
         <div className="mb-5 flex items-end justify-between gap-3 sm:mb-7">
-
           <div className="space-y-1.5">
+
             <div className="flex items-center gap-2">
               <Sparkles className="size-4 text-[#c8f31d]" />
 
@@ -122,121 +119,182 @@ console.log(SeparaSegundoNome("Premio premiun"))
             </div>
 
             <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl lg:text-3xl">
-            {SeparaPrimeiroNome(nome || "") || "Prêmios"} {" "}
+              {primeiraParte}{" "}
+
               <span className="text-[#c8f31d]">
-              {SeparaSegundoNome(nome || "") || "Premium"} 
+                {segundaParte}
               </span>
             </h2>
 
             <p className="text-xs text-zinc-500 sm:text-sm">
-              Escolha seu desafio e tente acertar.
+              {desc || "Escolha seu desafio e tente acertar."}
             </p>
           </div>
 
+          {/* CONTADOR */}
           <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-2 sm:flex">
             <span className="size-1.5 rounded-full bg-[#c8f31d]" />
 
             <span className="text-xs font-medium text-zinc-400">
-              {PremioItem.length} desafios
+              {premios.length} desafios
             </span>
           </div>
         </div>
 
-        {/* GRID DE PRÊMIOS */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:gap-6">
+        {/* ESTADO VAZIO */}
+        {premios.length === 0 ? (
+          <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#111612] p-6 text-center">
+            <Trophy className="mb-4 size-9 text-[#c8f31d]" />
 
-          {PremioItem.map((premio) => (
-            <Card
-              key={premio.id}
-              className="
-                group relative gap-0 overflow-hidden
-                rounded-2xl border border-white/[0.08]
-                bg-[#111612] p-0
-                shadow-none
-                transition-all duration-300
-                hover:-translate-y-1
-                hover:border-[#c8f31d]/30
-                hover:bg-[#141b15]
-              "
-            >
-              {/* IMAGEM DO PRÊMIO */}
-              <div className="relative aspect-square w-full overflow-hidden bg-[#080c09]">
+            <h3 className="text-lg font-semibold text-white">
+              Nenhum prêmio disponível
+            </h3>
 
-                <Image
-                  src={premio.img}
-                  alt={premio.nome}
-                  fill
-                  quality={90}
-                  sizes="
-                    (max-width: 640px) 50vw,
-                    (max-width: 1024px) 33vw,
-                    400px
-                  "
+            <p className="mt-2 max-w-sm text-sm text-zinc-500">
+              Os desafios estão sendo preparados.
+              Volte em alguns instantes.
+            </p>
+          </div>
+        ) : (
+          /* GRID */
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:gap-6">
+            {premios.map((premio) => {
+              const visual = premioVisual[premio.id]
+
+              if (!visual) return null
+
+              const disponivel = premio.stock > 0
+
+              return (
+                <Card
+                  key={premio.id}
                   className="
-                    object-cover
-                    transition-transform duration-500
-                    group-hover:scale-[1.035]
+                    group relative gap-0 overflow-hidden
+                    rounded-2xl border border-white/[0.08]
+                    bg-[#111612] p-0
+                    shadow-none
+                    transition-all duration-300
+                    hover:-translate-y-1
+                    hover:border-[#c8f31d]/30
+                    hover:bg-[#141b15]
                   "
-                />
+                >
+                  {/* IMAGEM */}
+                  <div className="relative aspect-square w-full overflow-hidden bg-[#080c09]">
 
-                {/* Gradiente inferior */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#111612] to-transparent" />
+                    <Image
+                      src={visual.img}
+                      alt={premio.name}
+                      fill
+                      quality={90}
+                      sizes="
+                        (max-width: 640px) 50vw,
+                        (max-width: 1024px) 33vw,
+                        400px
+                      "
+                      className="
+                        object-cover
+                        transition-transform duration-500
+                        group-hover:scale-[1.035]
+                      "
+                    />
 
-                {/* BADGE DESTAQUE */}
-                {premio.destaque && (
-                  <Badge
-                    className="
-                      absolute left-2 top-2
-                      border-0 bg-lima
-                      px-2 py-1
-                      text-[9px] font-bold
-                      text-[#101509]
-                      shadow-sm
-                      sm:left-3 sm:top-3
-                      sm:text-[10px]
-                    "
-                  >
-                    <Sparkles className="mr-1 size-3" />
-                    DESTAQUE
-                  </Badge>
-                )}
-              </div>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#111612] to-transparent" />
 
-              {/* CONTEÚDO */}
-              <div className="flex flex-1 flex-col p-3 pt-2 sm:p-4">
+                    {/* DESTAQUE */}
+                    {visual.destaque && (
+                      <Badge
+                        className="
+                          absolute left-2 top-2
+                          border-0 bg-[#c8f31d]
+                          px-2 py-1
+                          text-[9px] font-bold
+                          text-[#101509]
+                          shadow-sm
+                          sm:left-3 sm:top-3
+                          sm:text-[10px]
+                        "
+                      >
+                        <Sparkles className="mr-1 size-3" />
+                        DESTAQUE
+                      </Badge>
+                    )}
 
-                {/* CATEGORIA */}
-                <span className="mb-1 text-[10px] font-medium text-zinc-500 sm:text-xs">
-                  {premio.tipo}
-                </span>
-
-                {/* NOME */}
-                <h3 className="line-clamp-1 text-sm font-bold text-white sm:text-lg">
-                  {premio.nome}
-                </h3>
-
-                {/* DIVISÓRIA */}
-                <div className="my-3 h-px w-full bg-white/[0.06] sm:my-4" />
-
-                {/* PREÇO */}
-                <div className="mb-3 sm:mb-4">
-                  <p className="mb-1 text-[10px] text-zinc-500 sm:text-xs">
-                    Participação a partir de
-                  </p>
-
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-xl font-extrabold tracking-tight text-[#c8f31d] sm:text-2xl">
-                      {formatCurrency(premio.valor)}
-                    </span>
+                    {/* INDISPONÍVEL */}
+                    {!disponivel && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/65">
+                        <span className="rounded-full border border-white/20 bg-black/70 px-4 py-2 text-xs font-semibold text-white">
+                          Indisponível
+                        </span>
+                      </div>
+                    )}
                   </div>
-                </div>
 
-                {/* BOTÃO JOGAR */}
-               <DialogJogo id={premio.id} time={premio.time  ||  5.0} nome={premio.nome} tipo={premio.tipo} valor={premio.valor} img={premio.img }   />
-              </div>
-            </Card>
-          ))}
-        </div>
+                  {/* CONTEÚDO */}
+                  <div className="flex flex-1 flex-col p-3 pt-2 sm:p-4">
+
+                    <span className="mb-1 text-[10px] font-medium text-zinc-500 sm:text-xs">
+                      {visual.tipo}
+                    </span>
+
+                    <h3 className="line-clamp-1 text-sm font-bold text-white sm:text-lg">
+                      {premio.name}
+                    </h3>
+
+                    {/* TEMPO */}
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <Clock3 className="size-3.5 text-[#c8f31d]" />
+
+                      <span className="text-[11px] text-zinc-400 sm:text-xs">
+                        Acerte em {formatTime(premio.targetMs)}s
+                      </span>
+                    </div>
+
+                    <div className="my-3 h-px w-full bg-white/[0.06] sm:my-4" />
+
+                    {/* PREÇO */}
+                    <div className="mb-3 sm:mb-4">
+                      <p className="mb-1 text-[10px] text-zinc-500 sm:text-xs">
+                        Participação a partir de
+                      </p>
+
+                      <span className="text-xl font-extrabold tracking-tight text-[#c8f31d] sm:text-2xl">
+                        {formatCurrency(premio.playCost)}
+                      </span>
+                    </div>
+
+                    {/* JOGO */}
+                    <div className="mt-auto">
+                      {disponivel ? (
+                        <DialogJogo
+                          id={premio.id}
+                          time={premio.targetMs / 1000}
+                          nome={premio.name}
+                          tipo={visual.tipo}
+                          valor={premio.playCost / 100}
+                          img={visual.img}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          className="
+                            h-11 w-full cursor-not-allowed
+                            rounded-xl border border-white/10
+                            bg-white/5 text-sm font-semibold
+                            text-zinc-500
+                          "
+                        >
+                          Indisponível
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        )}
 
         {/* RODAPÉ */}
         <div className="mt-6 flex items-center justify-center gap-2 text-center sm:mt-8">
@@ -248,5 +306,5 @@ console.log(SeparaSegundoNome("Premio premiun"))
         </div>
       </div>
     </section>
-  );
+  )
 }
