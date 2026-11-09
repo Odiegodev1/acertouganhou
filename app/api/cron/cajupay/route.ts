@@ -3,9 +3,6 @@ import { timingSafeEqual } from "node:crypto"
 
 import { reconcileCajuPayDeposits } from "@/lib/payments/reconcile-cajupay"
 
-export const runtime = "nodejs"
-export const dynamic = "force-dynamic"
-
 // ==========================================
 // AUTENTICAÇÃO DO CRON
 // ==========================================
