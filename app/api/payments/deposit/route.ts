@@ -1,36 +1,21 @@
-import { NextRequest, NextResponse } from "next/server"
-import { z } from "zod"
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
-import { auth } from "@/lib/auth"
-import prisma from "@/lib/prisma"
+import { auth } from "@/lib/auth";
+import prisma from "@/lib/prisma";
 
 import {
   createCajuPayPix,
   CajuPayError,
-} from "@/lib/payments/cajupay"
+} from "@/lib/payments/cajupay";
 
 
-
-// ==========================================
-// VALIDAÇÃO
-// ==========================================
 
 const depositSchema = z.object({
-  amount: z
-    .number()
-    .int()
-    .min(1000, "Depósito mínimo de R$ 10,00.")
-    .max(
-      1000000,
-      "Depósito máximo de R$ 10.000,00."
-    ),
-})
+  amount: z.number().int().min(1000).max(1000000),
+});
 
-// ==========================================
-// RESPOSTA DE ERRO
-// ==========================================
-
-function jsonError(message: string, status: number) {
+function errorResponse(message: string, status: number) {
   return NextResponse.json(
     {
       success: false,
@@ -41,457 +26,239 @@ function jsonError(message: string, status: number) {
       headers: {
         "Cache-Control": "no-store",
       },
-    }
-  )
+    },
+  );
 }
 
-// ==========================================
-// VALIDAR URL DO CHECKOUT
-// ==========================================
-
-function getCheckoutUrl(): string | null {
-  const appUrl = process.env.APP_URL
-
-  if (!appUrl) {
-    return null
-  }
-
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const baseUrl = new URL(appUrl)
-
-    if (baseUrl.protocol !== "https:") {
-      return null
-    }
-
-    if (
-      baseUrl.username ||
-      baseUrl.password ||
-      !baseUrl.hostname
-    ) {
-      return null
-    }
-
-    const checkoutUrl = new URL(
-      "/carteira",
-      baseUrl
-    )
-
-    return checkoutUrl.toString()
-  } catch {
-    return null
-  }
-}
-
-// ==========================================
-// CRIAR DEPÓSITO PIX
-// ==========================================
-
-export async function POST(request: NextRequest) {
-  try {
-    // ==========================================
-    // 1. AUTENTICAÇÃO
-    // ==========================================
-
-    const session = await auth()
+    // 1. Autenticação
+    const session = await auth();
 
     if (!session?.user?.id) {
-      return jsonError(
-        "Você precisa estar logado.",
-        401
-      )
+      return errorResponse("Faça login para continuar.", 401);
     }
-
-    const userId = session.user.id
-
-    // ==========================================
-    // 2. VERIFICAR CONFIGURAÇÃO
-    // ==========================================
 
     if (process.env.PAYMENTS_ENABLED !== "true") {
-      return jsonError(
-        "Depósitos indisponíveis.",
-        503
-      )
+      return errorResponse("Depósitos desabilitados.", 503);
     }
 
-    if (
-      !process.env.CAJUPAY_API_KEY ||
-      !process.env.CAJUPAY_API_SECRET
-    ) {
-      console.error(
-        "[CAJUPAY_CONFIG] Credenciais ausentes."
-      )
+    // 2. Validar valor
+    const body: unknown = await request.json().catch(() => null);
 
-      return jsonError(
-        "Gateway de pagamento não configurado.",
-        503
-      )
-    }
-
-    // ==========================================
-    // 3. VALIDAR JSON
-    // ==========================================
-
-    let body: unknown
-
-    try {
-      body = await request.json()
-    } catch {
-      return jsonError(
-        "JSON inválido.",
-        400
-      )
-    }
-
-    const parsed = depositSchema.safeParse(body)
+    const parsed = depositSchema.safeParse(body);
 
     if (!parsed.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Valor inválido.",
-          details: parsed.error.flatten(),
-        },
-        {
-          status: 422,
-          headers: {
-            "Cache-Control": "no-store",
-          },
-        }
-      )
+      return errorResponse(
+        "Valor inválido. Mínimo R$ 10,00 e máximo R$ 10.000,00.",
+        422,
+      );
     }
 
-    const { amount } = parsed.data
+    const userId = session.user.id;
 
-    // ==========================================
-    // 4. CONSULTAR USUÁRIO
-    // ==========================================
-
+    // 3. Buscar dados do usuário
     const user = await prisma.user.findUnique({
       where: {
         id: userId,
       },
-
       select: {
         name: true,
         email: true,
         cpf: true,
         phone: true,
       },
-    })
+    });
 
-    if (!user) {
-      return jsonError(
-        "Usuário não encontrado.",
-        404
-      )
+    if (!user?.name || !user.email || !user.cpf || !user.phone) {
+      return errorResponse(
+        "Complete nome, e-mail, CPF e telefone no cadastro.",
+        422,
+      );
     }
 
-    // ==========================================
-    // 5. VALIDAR CADASTRO
-    // ==========================================
-
-    const name = user.name?.trim()
-    const email = user.email?.trim()
-    const cpf = user.cpf?.replace(/\D/g, "")
-    const phone = user.phone?.replace(/\D/g, "")
-
-    if (
-      !name ||
-      !email ||
-      !cpf ||
-      !phone
-    ) {
-      return jsonError(
-        "Complete seu cadastro antes de depositar.",
-        422
-      )
-    }
-
-    if (!/^\d{11}$/.test(cpf)) {
-      return jsonError(
-        "CPF inválido. Atualize seu cadastro.",
-        422
-      )
-    }
-
-    // Aceita telefone nacional de 10 ou 11 dígitos
-    // ou telefone brasileiro com DDI 55.
-    const nationalPhone = phone.startsWith("55")
-      ? phone.slice(2)
-      : phone
-
-    if (!/^\d{10,11}$/.test(nationalPhone)) {
-      return jsonError(
-        "Telefone inválido. Atualize seu cadastro.",
-        422
-      )
-    }
-
-    const normalizedPhone = `+55${nationalPhone}`
-
-    // ==========================================
-    // 6. LIMITAR DEPÓSITOS PENDENTES
-    // ==========================================
-
-    const pendingCount =
-      await prisma.paymentDeposit.count({
-        where: {
-          userId,
-
-          status: {
-            in: ["PENDING", "PROCESSING"],
-          },
-        },
-      })
-
-    if (pendingCount >= 5) {
-      return jsonError(
-        "Você possui muitos depósitos pendentes. Aguarde a confirmação ou expiração das cobranças anteriores.",
-        429
-      )
-    }
-
-    // ==========================================
-    // 7. VALIDAR URL DO CHECKOUT
-    // ==========================================
-
-    const checkoutUrl = getCheckoutUrl()
-
-    if (!checkoutUrl) {
-      console.error(
-        "[CAJUPAY_CONFIG] APP_URL inválida."
-      )
-
-      return jsonError(
-        "URL de checkout não configurada corretamente.",
-        503
-      )
-    }
-
-    // ==========================================
-    // 8. CRIAR DEPÓSITO LOCAL
-    // ==========================================
-
-    const deposit =
-      await prisma.paymentDeposit.create({
-        data: {
-          userId,
-          amount,
-          status: "PENDING",
-        },
-      })
-
-    // ==========================================
-    // 9. CRIAR COBRANÇA NA CAJUPAY
-    // ==========================================
+    // 4. Configurar checkout
+    let checkoutUrl: string;
 
     try {
-      console.info("[CAJUPAY_CREATE_START]", {
-        depositId: deposit.id,
-        amountCents: amount,
-        checkoutHost: new URL(
-          checkoutUrl
-        ).hostname,
-      })
+      const appUrl = new URL(process.env.APP_URL || "");
 
-      const payment = await createCajuPayPix({
-        amountCents: amount,
-
-        depositId: deposit.id,
-
-        checkoutUrl,
-
-        customer: {
-          name,
-          email,
-          document: cpf,
-          phone: normalizedPhone,
-        },
-      })
-
-      // ==========================================
-      // 10. VALIDAR RESPOSTA
-      // ==========================================
-
-      if (!payment.payment_id) {
-        throw new Error(
-          "A CajuPay não retornou o identificador da cobrança."
-        )
+      if (
+        appUrl.protocol !== "https:" ||
+        appUrl.username ||
+        appUrl.password
+      ) {
+        return errorResponse("APP_URL inválida.", 503);
       }
 
-      // ==========================================
-      // 11. SALVAR COBRANÇA
-      // ==========================================
+      checkoutUrl = new URL("/carteira", appUrl).toString();
+    } catch {
+      return errorResponse(
+        "APP_URL deve ser uma URL HTTPS válida.",
+        503,
+      );
+    }
 
+    // 5. Verificar cobranças incertas
+    const uncertain = await prisma.paymentDeposit.count({
+      where: {
+        userId,
+        status: "RECONCILIATION_REQUIRED",
+      },
+    });
+
+    if (uncertain > 0) {
+      return errorResponse(
+        "Existe uma cobrança aguardando verificação. Consulte o suporte.",
+        409,
+      );
+    }
+
+    // 6. Limitar cobranças pendentes
+    const pending = await prisma.paymentDeposit.count({
+      where: {
+        userId,
+        status: {
+          in: ["PENDING", "PROCESSING"],
+        },
+      },
+    });
+
+    if (pending >= 5) {
+      return errorResponse(
+        "Você já possui cinco cobranças pendentes.",
+        429,
+      );
+    }
+
+    // 7. Criar depósito local
+    const deposit = await prisma.paymentDeposit.create({
+      data: {
+        userId,
+        amount: parsed.data.amount,
+        status: "PENDING",
+      },
+    });
+
+    console.info("[CREATE_DEPOSIT]", {
+      depositId: deposit.id,
+      amount: deposit.amount,
+    });
+
+    // 8. Solicitar Pix à CajuPay
+    try {
+      const payment = await createCajuPayPix({
+        depositId: deposit.id,
+        amountCents: deposit.amount,
+        checkoutUrl,
+        customer: {
+          name: user.name,
+          email: user.email,
+          document: user.cpf,
+          phone: user.phone,
+        },
+      });
+
+      // 9. Salvar pagamento
       await prisma.paymentDeposit.update({
         where: {
           id: deposit.id,
         },
-
         data: {
-          providerTransactionId:
-            payment.payment_id,
-
-          pixCopyPaste:
-            payment.pix_copy_paste ?? null,
+          providerTransactionId: payment.payment_id,
+          pixCopyPaste: payment.pix_copy_paste ?? null,
+          pixQrCode: payment.pix_qr_code ?? null,
+          status: "PROCESSING",
         },
-      })
+      });
 
-      console.info("[CAJUPAY_CREATE_SUCCESS]", {
+      console.info("[DEPOSIT_CREATED]", {
         depositId: deposit.id,
-        providerTransactionId:
-          payment.payment_id,
-      })
+        paymentId: payment.payment_id,
+      });
 
-      // ==========================================
-      // 12. RETORNAR PIX
-      // ==========================================
-
+      // 10. Retornar sucesso
       return NextResponse.json(
         {
           success: true,
-
           mode: "PIX",
-
           provider: "CAJUPAY",
-
-          message:
-            "Cobrança Pix criada com sucesso.",
-
           deposit: {
             id: deposit.id,
             amount: deposit.amount,
-            status: "PENDING",
-
-            createdAt:
-              deposit.createdAt.toISOString(),
-
-            providerTransactionId:
-              payment.payment_id,
-
-            pixCopyPaste:
-              payment.pix_copy_paste ?? null,
+            status: "PROCESSING",
+            providerTransactionId: payment.payment_id,
+            pixCopyPaste: payment.pix_copy_paste ?? null,
+            pixQrCode: payment.pix_qr_code ?? null,
           },
         },
         {
           status: 201,
-
           headers: {
             "Cache-Control": "no-store",
           },
-        }
-      )
-    } catch (error) {
-      // ==========================================
-      // 13. TRATAR ERRO DO PROVEDOR
-      // ==========================================
-
-      const isProviderError =
-        error instanceof CajuPayError
-
-      const statusCode = isProviderError
-        ? error.statusCode
-        : null
-
-      const errorCode = isProviderError
-        ? error.code
-        : "UNEXPECTED_ERROR"
-
-      console.error("[CAJUPAY_CREATE_PIX]", {
-        depositId: deposit.id,
-
-        error: {
-          status: statusCode,
-          code: errorCode,
         },
-      })
+      );
+    } catch (error) {
+      const definitive =
+        error instanceof CajuPayError && error.definitive;
 
-      // ==========================================
-      // 14. CLASSIFICAR RESULTADO
-      // ==========================================
-
-      /*
-       * Uma falha de validação claramente documentada
-       * pode indicar que a cobrança foi rejeitada.
-       *
-       * Erros genéricos, timeout ou falhas de rede
-       * não provam que a cobrança deixou de existir.
-       */
-
-      const definitiveRejectionCodes = new Set([
-        "invalid_amount",
-        "below_minimum_charge_amount",
-        "missing_idempotency_key",
-        "invalid_partner_checkout_url",
-        "https_required",
-        "idempotency_key_reuse_mismatch",
-      ])
-
-      const definitivelyRejected =
-        isProviderError &&
-        statusCode === 400 &&
-        definitiveRejectionCodes.has(errorCode)
-
-      if (definitivelyRejected) {
+      // Nunca marcar como FAILED uma cobrança de resultado incerto.
+      try {
         await prisma.paymentDeposit.updateMany({
           where: {
             id: deposit.id,
             status: "PENDING",
             providerTransactionId: null,
           },
-
           data: {
-            status: "FAILED",
+            status: definitive
+              ? "FAILED"
+              : "RECONCILIATION_REQUIRED",
           },
-        })
+        });
+      } catch (databaseError) {
+        console.error("[DEPOSIT_STATUS_ERROR]", {
+          depositId: deposit.id,
+          error:
+            databaseError instanceof Error
+              ? databaseError.message
+              : "UNKNOWN",
+        });
       }
 
-      // ==========================================
-      // 15. ERROS ESPECÍFICOS
-      // ==========================================
+      console.error("[CAJUPAY_DEPOSIT_ERROR]", {
+        depositId: deposit.id,
+        code:
+          error instanceof CajuPayError
+            ? error.code
+            : "UNKNOWN",
+        providerStatus:
+          error instanceof CajuPayError
+            ? error.statusCode
+            : null,
+        requestId:
+          error instanceof CajuPayError
+            ? error.requestId
+            : null,
+      });
 
-      if (statusCode === 401) {
-        return jsonError(
-          "A CajuPay recusou as credenciais de pagamento.",
-          502
-        )
-      }
-
-      if (statusCode === 403) {
-        return jsonError(
-          "A chave de pagamento não possui permissão para criar cobranças Pix.",
-          502
-        )
-      }
-
-      if (
-        errorCode === "PROVIDER_NON_JSON_ERROR"
-      ) {
-        return jsonError(
-          "A CajuPay não conseguiu criar a cobrança Pix. A solicitação foi registrada para verificação.",
-          502
-        )
-      }
-
-      if (statusCode === 429) {
-        return jsonError(
-          "O serviço de pagamentos está ocupado. Aguarde antes de tentar novamente.",
-          503
-        )
-      }
-
-      return jsonError(
-        "Não foi possível confirmar a criação da cobrança. Verifique seu histórico antes de tentar novamente.",
-        502
-      )
+      return errorResponse(
+        definitive
+          ? "A CajuPay rejeitou os dados da cobrança."
+          : "Não foi possível confirmar a criação do Pix. Aguarde a verificação.",
+        definitive ? 422 : 502,
+      );
     }
   } catch (error) {
-    console.error("[CREATE_DEPOSIT]", error)
+    console.error("[CREATE_DEPOSIT_ERROR]", {
+      message:
+        error instanceof Error ? error.message : "UNKNOWN",
+    });
 
-    return jsonError(
+    return errorResponse(
       "Erro interno ao criar depósito.",
-      500
-    )
+      500,
+    );
   }
 }

@@ -214,66 +214,73 @@ export function FormDeposito({
   // =====================================================
 
   async function onSubmit(data: FormSchemaDeposito) {
-    if (loading) return
-
-    setLoading(true)
-
+    if (loading) return;
+  
+    setLoading(true);
+  
     try {
-      const response = await fetch(
-        "/api/payments/deposit",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "same-origin",
-          cache: "no-store",
-          body: JSON.stringify({
-            amount: data.valor,
-          }),
+      const response = await fetch("/api/payments/deposit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({
+          amount: data.valor,
+        }),
+      });
+  
+      const responseText = await response.text();
+  
+      let result: DepositResponse;
+  
+      try {
+        if (!responseText.trim()) {
+          throw new Error("Resposta vazia");
         }
-      )
-
-      const result: DepositResponse =
-        await response.json()
-
-      if (
-        !response.ok ||
-        !result.success ||
-        !result.deposit
-      ) {
+  
+        result = JSON.parse(responseText) as DepositResponse;
+      } catch {
         toast.error(
-          result.error ||
-            "Não foi possível gerar o Pix."
-        )
-
-        return
+          `O servidor retornou uma resposta inválida (HTTP ${response.status}).`,
+        );
+        return;
       }
-
-      confirmedRef.current = false
-
-      setDeposit(result.deposit)
-
+  
+      if (!response.ok || !result.success || !result.deposit) {
+        toast.error(
+          result.error || "Não foi possível gerar o Pix.",
+        );
+        return;
+      }
+  
+      confirmedRef.current = false;
+  
+      setDeposit(result.deposit);
+  
       if (
         result.mode === "PIX" &&
         result.deposit.pixCopyPaste
       ) {
-        setStep("pix")
-
-        toast.success("Pix gerado com sucesso!")
+        setStep("pix");
+  
+        toast.success("Pix gerado com sucesso!");
       } else {
-        setStep("preview")
-
-        toast.info("Solicitação registrada.")
+        setStep("preview");
+  
+        toast.info("Solicitação registrada.");
       }
-
-      router.refresh()
+  
+      router.refresh();
     } catch (error) {
-      console.error("[CREATE_DEPOSIT]", error)
-
-      toast.error("Erro ao preparar o depósito.")
+      console.error("[CREATE_DEPOSIT]", error);
+  
+      toast.error(
+        "Não foi possível conectar ao servidor. Tente novamente mais tarde.",
+      );
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 

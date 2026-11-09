@@ -20,7 +20,8 @@ import { DraweCadastro } from "./Drawecadastro";
 import { auth } from "@/lib/auth";
 import { DropdownMenuDemo } from "./dropmenuavatar";
 import { DialogDeposito } from "./draweDeposito";
-import { getPaymentBalance } from "./form/actions/wallet/get-wallet";
+import { getPaymentBalance } from "@/lib/payments/get-payment";
+
 
 type PrizeItem = {
   id: number;

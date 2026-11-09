@@ -20,10 +20,9 @@ import {
 } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/useIsMobile"
-
 import { FormDeposito } from "./form/formdeposito"
 import { GAME_WALLET_UPDATED } from "@/lib/wallet-events"
-import { getGameWalletBalance } from "./form/actions/wallet/get-game"
+import { getPaymentBalance } from "@/lib/payments/get-payment"
 
 
 interface DialogDepositoProps {
@@ -78,21 +77,21 @@ export function DialogDeposito({
   )
 
   // ==========================================
-  // CARREGAR SALDO DO JOGO
+  // CARREGAR SALDO FINANCEIRO REAL
   // ==========================================
 
   const loadBalance = React.useCallback(async () => {
     const requestId = ++requestIdRef.current
 
     try {
-      const result = await getGameWalletBalance()
+      const result = await getPaymentBalance()
 
       if (requestId !== requestIdRef.current) {
         return
       }
 
       if (result.success) {
-        setBalance(result.balance)
+        setBalance(result.availableBalance)
       } else {
         setBalance(null)
       }
@@ -101,7 +100,7 @@ export function DialogDeposito({
         return
       }
 
-      console.error("[GAME_WALLET_BALANCE]", error)
+      console.error("[PAYMENT_WALLET_BALANCE]", error)
 
       setBalance(null)
     } finally {
@@ -134,7 +133,7 @@ export function DialogDeposito({
   }, [open, loadBalance])
 
   // ==========================================
-  // ATUALIZAR APÓS PARTIDAS
+  // ATUALIZAR APÓS EVENTOS DA CARTEIRA
   // ==========================================
 
   React.useEffect(() => {
@@ -191,7 +190,7 @@ export function DialogDeposito({
   }, [loadBalance])
 
   // ==========================================
-  // ATUALIZAÇÃO PERIÓDICA
+  // ATUALIZAÇÃO AUTOMÁTICA A CADA 15 SEGUNDOS
   // ==========================================
 
   React.useEffect(() => {
@@ -211,15 +210,9 @@ export function DialogDeposito({
   // ==========================================
 
   const handleSuccess = React.useCallback(async () => {
-    // Atualiza o saldo do jogo, caso ele tenha
-    // sido alterado por uma operação independente.
-    // Não transfere saldo da CajuPay para Wallet.
     await loadBalance()
 
     onSuccess?.()
-
-    // Mantém o Drawer aberto para mostrar
-    // a confirmação do Pix.
   }, [loadBalance, onSuccess])
 
   // ==========================================
@@ -280,7 +273,10 @@ export function DialogDeposito({
         "
       >
         <DrawerHeader className="sr-only">
-          <DrawerTitle>Depositar via Pix</DrawerTitle>
+          <DrawerTitle>
+            Depositar via Pix
+          </DrawerTitle>
+
           <DrawerDescription>
             Adicione saldo à sua carteira utilizando Pix.
           </DrawerDescription>

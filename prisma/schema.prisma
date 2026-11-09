@@ -257,15 +257,7 @@ model PaymentAccount {
 // DEPÓSITOS PIX
 // =====================================
 
-enum PaymentDepositStatus {
-  PENDING
-  PROCESSING
-  PAID
-  FAILED
-  CANCELLED
-  REFUNDED
-  CHARGEBACK
-}
+
 
 model PaymentDeposit {
   id     String @id @default(cuid())
@@ -352,18 +344,27 @@ enum PaymentWebhookStatus {
   PROCESSED
   FAILED
 }
+enum PaymentDepositStatus {
+  PENDING
+  PROCESSING
+  RECONCILIATION_REQUIRED
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+  CHARGEBACK
+}
 
 model PaymentWebhookEvent {
   id String @id @default(cuid())
 
-  provider String @default("SKALAPAY")
+  provider String @default("CAJUPAY")
 
   eventType String
 
   transactionId String?
   orderId       String?
 
-  // Hash para identificar notificações repetidas
   eventHash String @unique
 
   status PaymentWebhookStatus @default(RECEIVED)

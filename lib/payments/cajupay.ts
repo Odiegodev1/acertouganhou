@@ -1,1030 +1,472 @@
-import "server-only"
+import "server-only";
 
-import { randomUUID } from "node:crypto"
+import { randomUUID } from "node:crypto";
 
-// ==========================================
-// CONFIGURAÇÃO
-// ==========================================
+const API_URL = "https://api.cajupay.com.br";
+const PIX_PATH = "/api/payments/pix";
+const TIMEOUT_MS = 15000;
 
-const DEFAULT_API_URL = "https://api.cajupay.com.br"
+export interface CreatePixInput {
+  amountCents: number;
+  depositId: string;
+  checkoutUrl: string;
+  customer: {
+    name: string;
+    email: string;
+    document: string;
+    phone: string;
+  };
+}
 
-const DEFAULT_PIX_PATH = "/api/payments/pix"
-
-const REQUEST_TIMEOUT = 15000
-
-const DEBUG_ENABLED =
-  process.env.CAJUPAY_DEBUG === "true" ||
-  process.env.NODE_ENV === "development"
-
-// ==========================================
-// TIPOS
-// ==========================================
+export interface CajuPayPixResponse {
+  payment_id: string;
+  provider: string;
+  pix_copy_paste?: string;
+  pix_qr_code?: string;
+  status: string;
+}
 
 export class CajuPayError extends Error {
   constructor(
     message: string,
     public readonly statusCode: number,
-    public readonly code: string = "CAJUPAY_ERROR"
+    public readonly code: string,
+    public readonly definitive = false,
+    public readonly requestId: string | null = null,
   ) {
-    super(message)
-
-    this.name = "CajuPayError"
+    super(message);
+    this.name = "CajuPayError";
   }
 }
 
-export interface CreatePixInput {
-  amountCents: number
-
-  depositId: string
-
-  checkoutUrl: string
-
-  customer: {
-    name: string
-    email: string
-    document: string
-    phone: string
-  }
+function digits(value: string): string {
+  return value.replace(/\D/g, "");
 }
 
-export interface CajuPayPixResponse {
-  payment_id: string
-  provider: string
-  pix_copy_paste?: string
-  pix_qr_code?: string
-  status: string
-}
+function validCPF(value: string): boolean {
+  const cpf = digits(value);
 
-type JsonRecord = Record<string, unknown>
-
-interface RequestContext {
-  traceId: string
-  depositId: string
-  startedAt: number
-}
-
-// ==========================================
-// LOGGER
-// ==========================================
-
-function logInfo(
-  event: string,
-  data: Record<string, unknown>
-) {
-  console.info(`[CAJUPAY_${event}]`, {
-    timestamp: new Date().toISOString(),
-    ...data,
-  })
-}
-
-function logDebug(
-  event: string,
-  data: Record<string, unknown>
-) {
-  if (!DEBUG_ENABLED) return
-
-  console.debug(`[CAJUPAY_${event}]`, {
-    timestamp: new Date().toISOString(),
-    ...data,
-  })
-}
-
-function logError(
-  event: string,
-  data: Record<string, unknown>
-) {
-  console.error(`[CAJUPAY_${event}]`, {
-    timestamp: new Date().toISOString(),
-    ...data,
-  })
-}
-
-// ==========================================
-// UTILITÁRIOS
-// ==========================================
-
-function isRecord(
-  value: unknown
-): value is JsonRecord {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-  )
-}
-
-function getString(
-  object: JsonRecord,
-  key: string
-): string | undefined {
-  const value = object[key]
-
-  if (typeof value !== "string") {
-    return undefined
+  if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) {
+    return false;
   }
 
-  const trimmed = value.trim()
+  for (let position = 9; position <= 10; position++) {
+    let sum = 0;
 
-  return trimmed.length > 0
-    ? trimmed
-    : undefined
-}
+    for (let i = 0; i < position; i++) {
+      sum += Number(cpf[i]) * (position + 1 - i);
+    }
 
-function getProviderErrorCode(
-  data: JsonRecord
-): string {
-  const code = getString(data, "code")
+    const remainder = (sum * 10) % 11;
+    const expected = remainder === 10 ? 0 : remainder;
 
-  if (code) return code
-
-  const error = getString(data, "error")
-
-  if (error) return error
-
-  if (isRecord(data.error)) {
-    const nestedCode = getString(
-      data.error,
-      "code"
-    )
-
-    if (nestedCode) return nestedCode
+    if (expected !== Number(cpf[position])) {
+      return false;
+    }
   }
 
-  return "PROVIDER_HTTP_ERROR"
+  return true;
 }
 
-function elapsedMs(startedAt: number) {
-  return Math.round(performance.now() - startedAt)
+function normalizePhone(value: string): string {
+  const phone = digits(value);
+
+  const national =
+    phone.startsWith("55") &&
+    (phone.length === 12 || phone.length === 13)
+      ? phone.slice(2)
+      : phone;
+
+  if (!/^\d{10,11}$/.test(national)) {
+    throw new CajuPayError(
+      "Telefone inválido.",
+      422,
+      "INVALID_PHONE",
+      true,
+    );
+  }
+
+  return `+55${national}`;
 }
 
-// ==========================================
-// NORMALIZAR TELEFONE
-// ==========================================
+function getEndpoint(): URL {
+  const baseValue = process.env.CAJUPAY_API_URL?.trim() || API_URL;
+  const path = process.env.CAJUPAY_PIX_PATH?.trim() || PIX_PATH;
 
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "")
+  let base: URL;
 
-  if (
-    digits.length === 10 ||
-    digits.length === 11
-  ) {
-    return `+55${digits}`
+  try {
+    base = new URL(baseValue);
+  } catch {
+    throw new CajuPayError(
+      "URL da CajuPay inválida.",
+      503,
+      "INVALID_ENDPOINT",
+      true,
+    );
   }
 
   if (
-    digits.startsWith("55") &&
-    (
-      digits.length === 12 ||
-      digits.length === 13
-    )
-  ) {
-    return `+${digits}`
-  }
-
-  throw new CajuPayError(
-    "Telefone inválido.",
-    422,
-    "INVALID_PHONE"
-  )
-}
-
-// ==========================================
-// NORMALIZAR DOCUMENTO
-// ==========================================
-
-function normalizeDocument(
-  document: string
-): string {
-  const digits = document.replace(/\D/g, "")
-
-  if (
-    digits.length !== 11 &&
-    digits.length !== 14
+    base.protocol !== "https:" ||
+    base.username ||
+    base.password ||
+    !path.startsWith("/") ||
+    path.startsWith("//")
   ) {
     throw new CajuPayError(
-      "CPF ou CNPJ inválido.",
-      422,
-      "INVALID_DOCUMENT"
-    )
+      "Configuração da CajuPay inválida.",
+      503,
+      "INVALID_ENDPOINT",
+      true,
+    );
   }
 
-  return digits
+  const url = new URL(path, base);
+
+  if (url.origin !== base.origin) {
+    throw new CajuPayError(
+      "Endpoint não permitido.",
+      503,
+      "INVALID_ENDPOINT",
+      true,
+    );
+  }
+
+  return url;
 }
-
-// ==========================================
-// VALIDAR CPF
-// ==========================================
-
-function isValidCPF(cpf: string): boolean {
-  if (!/^\d{11}$/.test(cpf)) {
-    return false
-  }
-
-  if (/^(\d)\1{10}$/.test(cpf)) {
-    return false
-  }
-
-  for (let digit = 9; digit < 11; digit++) {
-    let sum = 0
-
-    for (let index = 0; index < digit; index++) {
-      sum +=
-        Number(cpf[index]) *
-        (digit + 1 - index)
-    }
-
-    const remainder = (sum * 10) % 11
-
-    const expected =
-      remainder === 10 ? 0 : remainder
-
-    if (expected !== Number(cpf[digit])) {
-      return false
-    }
-  }
-
-  return true
-}
-
-// ==========================================
-// CREDENCIAIS
-// ==========================================
 
 function getCredentials() {
   if (process.env.PAYMENTS_ENABLED !== "true") {
     throw new CajuPayError(
       "Pagamentos desabilitados.",
       503,
-      "PAYMENTS_DISABLED"
-    )
+      "PAYMENTS_DISABLED",
+      true,
+    );
   }
 
-  const apiKey =
-    process.env.CAJUPAY_API_KEY?.trim()
+  const key = process.env.CAJUPAY_API_KEY?.trim();
+  const secret = process.env.CAJUPAY_API_SECRET?.trim();
 
-  const apiSecret =
-    process.env.CAJUPAY_API_SECRET?.trim()
-
-  if (!apiKey || !apiSecret) {
+  if (!key || !secret) {
     throw new CajuPayError(
-      "Credenciais CajuPay não configuradas.",
+      "Credenciais da CajuPay ausentes.",
       503,
-      "MISSING_CREDENTIALS"
-    )
+      "MISSING_CREDENTIALS",
+      true,
+    );
   }
 
-  return {
-    apiKey,
-    apiSecret,
-  }
+  return { key, secret };
 }
 
-// ==========================================
-// ENDPOINT
-// ==========================================
-
-function getPixEndpoint(): URL {
-  const apiUrl = (
-    process.env.CAJUPAY_API_URL ||
-    DEFAULT_API_URL
-  ).trim()
-
-  const pixPath = (
-    process.env.CAJUPAY_PIX_PATH ||
-    DEFAULT_PIX_PATH
-  ).trim()
-
-  let baseUrl: URL
+function getCheckoutUrl(value: string): string {
+  let url: URL;
 
   try {
-    baseUrl = new URL(apiUrl)
+    url = new URL(value);
   } catch {
     throw new CajuPayError(
-      "CAJUPAY_API_URL inválida.",
-      503,
-      "INVALID_PROVIDER_URL"
-    )
+      "Checkout inválido.",
+      422,
+      "INVALID_CHECKOUT",
+      true,
+    );
   }
 
   if (
-    baseUrl.protocol !== "https:" ||
-    baseUrl.username ||
-    baseUrl.password
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password
   ) {
     throw new CajuPayError(
-      "A URL da CajuPay deve utilizar HTTPS.",
-      503,
-      "INVALID_PROVIDER_URL"
-    )
+      "Checkout precisa utilizar HTTPS.",
+      422,
+      "INVALID_CHECKOUT",
+      true,
+    );
   }
 
-  if (
-    !pixPath.startsWith("/") ||
-    pixPath.startsWith("//")
-  ) {
-    throw new CajuPayError(
-      "CAJUPAY_PIX_PATH inválido.",
-      503,
-      "INVALID_PROVIDER_PATH"
-    )
-  }
-
-  const endpoint = new URL(
-    pixPath,
-    baseUrl
-  )
-
-  if (
-    endpoint.protocol !== "https:" ||
-    endpoint.origin !== baseUrl.origin
-  ) {
-    throw new CajuPayError(
-      "Endpoint de pagamento inválido.",
-      503,
-      "INVALID_PROVIDER_URL"
-    )
-  }
-
-  return endpoint
+  return url.toString();
 }
 
-// ==========================================
-// VALIDAR ENTRADA
-// ==========================================
-
-function validateInput(input: CreatePixInput) {
+function buildPayload(input: CreatePixInput) {
   if (
     !Number.isSafeInteger(input.amountCents) ||
     input.amountCents < 1000 ||
     input.amountCents > 1000000
   ) {
     throw new CajuPayError(
-      "O valor deve estar entre R$ 10,00 e R$ 10.000,00.",
+      "Valor inválido.",
       422,
-      "INVALID_AMOUNT"
-    )
+      "INVALID_AMOUNT",
+      true,
+    );
   }
 
   if (!input.depositId?.trim()) {
     throw new CajuPayError(
-      "Identificador do depósito inválido.",
+      "Depósito inválido.",
       422,
-      "INVALID_DEPOSIT_ID"
-    )
+      "INVALID_DEPOSIT",
+      true,
+    );
   }
 
-  let checkoutUrl: URL
-
-  try {
-    checkoutUrl = new URL(input.checkoutUrl)
-  } catch {
-    throw new CajuPayError(
-      "URL de checkout inválida.",
-      422,
-      "INVALID_CHECKOUT_URL"
-    )
-  }
+  const name = input.customer.name.trim();
+  const email = input.customer.email.trim().toLowerCase();
+  const document = digits(input.customer.document);
 
   if (
-    checkoutUrl.protocol !== "https:" ||
-    checkoutUrl.username ||
-    checkoutUrl.password
+    name.length < 2 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    !validCPF(document)
   ) {
     throw new CajuPayError(
-      "O checkout precisa utilizar HTTPS.",
+      "Dados do consumidor inválidos.",
       422,
-      "INVALID_CHECKOUT_URL"
-    )
+      "INVALID_CUSTOMER",
+      true,
+    );
   }
 
-  const name = input.customer.name?.trim()
+  const phone = normalizePhone(input.customer.phone);
 
-  const email = input.customer.email
-    ?.trim()
-    .toLowerCase()
-
-  if (!name || !email) {
-    throw new CajuPayError(
-      "Dados do cliente incompletos.",
-      422,
-      "INVALID_CUSTOMER"
-    )
-  }
-
-  if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  ) {
-    throw new CajuPayError(
-      "E-mail inválido.",
-      422,
-      "INVALID_EMAIL"
-    )
-  }
-
-  const document = normalizeDocument(
-    input.customer.document
-  )
-
-  if (
-    document.length === 11 &&
-    !isValidCPF(document)
-  ) {
-    throw new CajuPayError(
-      "CPF inválido.",
-      422,
-      "INVALID_CPF"
-    )
-  }
-
-  const phone = normalizePhone(
-    input.customer.phone
-  )
-
+  // Estrutura mantida da integração existente.
+  // Ainda depende de validação com a documentação da CajuPay.
   return {
-    checkoutUrl: checkoutUrl.toString(),
-
-    customer: {
+    amount_cents: input.amountCents,
+    currency: "BRL",
+    description: `Deposito ${input.depositId}`,
+    customer_ref: input.depositId,
+    partner_checkout_url: getCheckoutUrl(input.checkoutUrl),
+    consumer: {
       name,
       email,
       document,
       phone,
     },
+  };
+}
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
 }
 
-// ==========================================
-// LOG SEGURO DO PAYLOAD
-// ==========================================
-
-function logRequestPayload(
-  context: RequestContext,
-  endpoint: URL,
-  payload: JsonRecord,
-  customer: {
-    name: string
-    email: string
-    document: string
-    phone: string
-  },
-  idempotencyKey: string
-) {
-  logDebug("REQUEST_PAYLOAD", {
-    traceId: context.traceId,
-
-    depositId: context.depositId,
-
-    endpoint: endpoint.toString(),
-
-    method: "POST",
-
-    idempotencyKey,
-
-    payload: {
-      amount_cents: payload.amount_cents,
-
-      currency: payload.currency,
-
-      description: payload.description,
-
-      customer_ref: payload.customer_ref,
-
-      partner_checkout_url:
-        payload.partner_checkout_url,
-
-      consumer: {
-        hasName: Boolean(customer.name),
-
-        nameLength: customer.name.length,
-
-        hasEmail: Boolean(customer.email),
-
-        emailFormatValid:
-          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-            customer.email
-          ),
-
-        documentLength:
-          customer.document.length,
-
-        documentValid:
-          customer.document.length === 11
-            ? isValidCPF(customer.document)
-            : null,
-
-        phoneLength:
-          customer.phone.length,
-
-        phoneE164:
-          /^\+[1-9]\d{7,14}$/.test(
-            customer.phone
-          ),
-      },
-    },
-
-    credentials: {
-      hasApiKey: Boolean(
-        process.env.CAJUPAY_API_KEY
-      ),
-
-      hasApiSecret: Boolean(
-        process.env.CAJUPAY_API_SECRET
-      ),
-    },
-  })
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
 }
 
-// ==========================================
-// RESPOSTA HTTP
-// ==========================================
-
-async function readCajuPayResponse(
-  response: Response,
-  context: RequestContext
-): Promise<JsonRecord> {
-  const raw = await response.text()
-
-  const contentType =
-    response.headers.get("content-type") ??
-    "unknown"
-
-  const requestId =
-    response.headers.get("x-request-id") ??
-    response.headers.get("x-correlation-id") ??
-    null
-
-  const durationMs = elapsedMs(
-    context.startedAt
-  )
-
-  // ========================================
-  // LOG DA RESPOSTA
-  // ========================================
-
-  logInfo("HTTP_RESPONSE", {
-    traceId: context.traceId,
-
-    depositId: context.depositId,
-
-    status: response.status,
-
-    statusText: response.statusText,
-
-    ok: response.ok,
-
-    durationMs,
-
-    contentType,
-
-    contentLength: raw.length,
-
-    requestId,
-  })
-
-  // ========================================
-  // INTERPRETAR JSON
-  // ========================================
-
-  let data: unknown
-
-  try {
-    data = JSON.parse(raw)
-  } catch {
-    // Não registrar o corpo de respostas
-    // bem-sucedidas: podem conter dados Pix.
-    if (!response.ok) {
-      logError("NON_JSON_RESPONSE", {
-        traceId: context.traceId,
-
-        depositId: context.depositId,
-
-        status: response.status,
-
-        contentType,
-
-        requestId,
-
-        responseBody:
-          DEBUG_ENABLED
-            ? raw.slice(0, 300)
-            : "[REDACTED]",
-      })
+function getErrorCode(data: unknown, raw: string): string {
+  if (isRecord(data)) {
+    if (typeof data.code === "string") {
+      return data.code;
     }
 
+    if (typeof data.error === "string") {
+      return data.error;
+    }
+  }
+
+  // A CajuPay já retornou "payment_create_failed" em texto puro.
+  const text = raw.trim();
+
+  if (/^[a-z][a-z0-9_]{0,100}$/i.test(text)) {
+    return text;
+  }
+
+  return "PROVIDER_REJECTED";
+}
+
+function getRequestId(response: Response): string | null {
+  return (
+    response.headers.get("request-id") ??
+    response.headers.get("x-request-id") ??
+    response.headers.get("x-correlation-id")
+  );
+}
+
+export async function createCajuPayPix(
+  input: CreatePixInput,
+): Promise<CajuPayPixResponse> {
+  const traceId = randomUUID();
+
+  const { key, secret } = getCredentials();
+  const url = getEndpoint();
+  const payload = buildPayload(input);
+
+  const idempotencyKey = `deposit-${input.depositId}-pix`;
+
+  console.info("[CAJUPAY_REQUEST]", {
+    traceId,
+    depositId: input.depositId,
+    endpoint: url.toString(),
+    amountCents: input.amountCents,
+  });
+
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-API-Key": key,
+        "X-API-Secret": secret,
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timeout =
+      error instanceof Error &&
+      ["TimeoutError", "AbortError"].includes(error.name);
+
+    console.error("[CAJUPAY_NETWORK_ERROR]", {
+      traceId,
+      depositId: input.depositId,
+      timeout,
+    });
+
     throw new CajuPayError(
-      response.ok
-        ? "A CajuPay retornou uma resposta inválida."
-        : `A CajuPay rejeitou a requisição (HTTP ${response.status}).`,
+      timeout
+        ? "A CajuPay demorou para responder."
+        : "Falha de comunicação com a CajuPay.",
+      timeout ? 504 : 502,
+      timeout ? "TIMEOUT" : "NETWORK_ERROR",
+      false,
+    );
+  }
 
-      response.ok ? 502 : response.status,
+  const requestId = getRequestId(response);
 
-      response.ok
-        ? "INVALID_RESPONSE"
-        : "PROVIDER_NON_JSON_ERROR"
-    )
+  let raw: string;
+
+  try {
+    raw = await response.text();
+  } catch {
+    throw new CajuPayError(
+      "Não foi possível ler a resposta da CajuPay.",
+      502,
+      "RESPONSE_READ_ERROR",
+      false,
+      requestId,
+    );
+  }
+
+  const data = parseJson(raw);
+
+  console.info("[CAJUPAY_RESPONSE]", {
+    traceId,
+    depositId: input.depositId,
+    httpStatus: response.status,
+    requestId,
+    responseFormat: data === null ? "text" : "json",
+  });
+
+  if (!response.ok) {
+    const code = getErrorCode(data, raw);
+
+    // Somente erros explicitamente conhecidos como rejeições
+    // definitivas são tratados dessa maneira.
+    const definitiveCodes = new Set([
+      "invalid_amount",
+      "below_minimum_charge_amount",
+      "missing_idempotency_key",
+      "invalid_partner_checkout_url",
+      "https_required",
+      "idempotency_key_reuse_mismatch",
+    ]);
+
+    const definitive =
+      [400, 409].includes(response.status) &&
+      definitiveCodes.has(code);
+
+    console.error("[CAJUPAY_PAYMENT_FAILED]", {
+      traceId,
+      depositId: input.depositId,
+      httpStatus: response.status,
+      providerCode: code,
+      requestId,
+      definitive,
+    });
+
+    throw new CajuPayError(
+      `Falha na criação do Pix: ${code}`,
+      response.status,
+      code,
+      definitive,
+      requestId,
+    );
   }
 
   if (!isRecord(data)) {
-    logError("INVALID_RESPONSE_STRUCTURE", {
-      traceId: context.traceId,
-
-      depositId: context.depositId,
-
-      status: response.status,
-
-      responseType: Array.isArray(data)
-        ? "array"
-        : typeof data,
-    })
-
     throw new CajuPayError(
-      "A CajuPay retornou uma estrutura inválida.",
+      "A CajuPay retornou uma resposta inesperada.",
       502,
-      "INVALID_RESPONSE_STRUCTURE"
-    )
-  }
-
-  // ========================================
-  // ERRO JSON
-  // ========================================
-
-  if (!response.ok) {
-    const errorCode = getProviderErrorCode(
-      data
-    )
-
-    logError("HTTP_ERROR", {
-      traceId: context.traceId,
-
-      depositId: context.depositId,
-
-      status: response.status,
-
-      errorCode,
-
+      "INVALID_RESPONSE",
+      false,
       requestId,
-
-      responseKeys: Object.keys(data),
-    })
-
-    throw new CajuPayError(
-      "A CajuPay recusou a solicitação.",
-      response.status,
-      errorCode
-    )
+    );
   }
 
-  // ========================================
-  // SUCESSO JSON
-  // ========================================
+  const paymentId = data.payment_id;
 
-  logDebug("JSON_RESPONSE", {
-    traceId: context.traceId,
+  if (
+    typeof paymentId !== "string" ||
+    !paymentId.trim()
+  ) {
+    throw new CajuPayError(
+      "Pagamento criado sem identificador confirmado.",
+      502,
+      "MISSING_PAYMENT_ID",
+      false,
+      requestId,
+    );
+  }
 
-    depositId: context.depositId,
-
-    responseKeys: Object.keys(data),
-
-    hasPaymentId:
-      typeof data.payment_id === "string",
-
-    hasPixCopyPaste:
-      typeof data.pix_copy_paste === "string",
-
-    hasPixQrCode:
-      typeof data.pix_qr_code === "string",
-
+  const result: CajuPayPixResponse = {
+    payment_id: paymentId,
+    provider:
+      typeof data.provider === "string"
+        ? data.provider
+        : "cajupay",
     status:
       typeof data.status === "string"
         ? data.status
-        : null,
-  })
-
-  return data
-}
-
-// ==========================================
-// VALIDAR RESPOSTA DO PIX
-// ==========================================
-
-function validatePixResponse(
-  data: JsonRecord
-): CajuPayPixResponse {
-  const paymentId = getString(
-    data,
-    "payment_id"
-  )
-
-  if (!paymentId) {
-    throw new CajuPayError(
-      "A CajuPay não retornou o identificador do pagamento.",
-      502,
-      "MISSING_PAYMENT_ID"
-    )
-  }
-
-  return {
-    payment_id: paymentId,
-
-    provider:
-      getString(data, "provider") ??
-      "CAJUPAY",
-
+        : "pending",
     pix_copy_paste:
-      getString(data, "pix_copy_paste"),
-
+      typeof data.pix_copy_paste === "string"
+        ? data.pix_copy_paste
+        : undefined,
     pix_qr_code:
-      getString(data, "pix_qr_code"),
+      typeof data.pix_qr_code === "string"
+        ? data.pix_qr_code
+        : undefined,
+  };
 
-    status:
-      getString(data, "status") ??
-      "pending",
-  }
-}
-
-// ==========================================
-// CRIAR COBRANÇA PIX
-// ==========================================
-
-export async function createCajuPayPix(
-  input: CreatePixInput
-): Promise<CajuPayPixResponse> {
-  const context: RequestContext = {
-    traceId: randomUUID(),
-
+  console.info("[CAJUPAY_PAYMENT_CREATED]", {
+    traceId,
     depositId: input.depositId,
-
-    startedAt: performance.now(),
-  }
-
-  logInfo("CREATE_START", {
-    traceId: context.traceId,
-
-    depositId: context.depositId,
-
-    amountCents: input.amountCents,
-  })
-
-  const controller = new AbortController()
-
-  const timeout = setTimeout(() => {
-    controller.abort()
-  }, REQUEST_TIMEOUT)
-
-  try {
-    // ========================================
-    // 1. CREDENCIAIS
-    // ========================================
-
-    const { apiKey, apiSecret } =
-      getCredentials()
-
-    logDebug("CONFIG", {
-      traceId: context.traceId,
-
-      paymentsEnabled:
-        process.env.PAYMENTS_ENABLED === "true",
-
-      hasApiKey: Boolean(apiKey),
-
-      hasApiSecret: Boolean(apiSecret),
-
-      timeoutMs: REQUEST_TIMEOUT,
-    })
-
-    // ========================================
-    // 2. VALIDAR ENTRADA
-    // ========================================
-
-    const validated = validateInput(input)
-
-    logDebug("INPUT_VALIDATED", {
-      traceId: context.traceId,
-
-      depositId: input.depositId,
-
-      amountCents: input.amountCents,
-
-      customer: {
-        nameProvided:
-          Boolean(validated.customer.name),
-
-        emailProvided:
-          Boolean(validated.customer.email),
-
-        documentLength:
-          validated.customer.document.length,
-
-        phoneE164:
-          /^\+[1-9]\d{7,14}$/.test(
-            validated.customer.phone
-          ),
-      },
-    })
-
-    // ========================================
-    // 3. ENDPOINT
-    // ========================================
-
-    const endpoint = getPixEndpoint()
-
-    // ========================================
-    // 4. PAYLOAD
-    // ========================================
-
-    const payload = {
-      amount_cents: input.amountCents,
-
-      currency: "BRL",
-
-      description:
-        `Deposito ${input.depositId}`,
-
-      customer_ref: input.depositId,
-
-      partner_checkout_url:
-        validated.checkoutUrl,
-
-      consumer: validated.customer,
-    }
-
-    const idempotencyKey =
-      `deposit-${input.depositId}-pix`
-
-    // ========================================
-    // 5. LOG DA REQUISIÇÃO
-    // ========================================
-
-    logRequestPayload(
-      context,
-      endpoint,
-      payload,
-      validated.customer,
-      idempotencyKey
-    )
-
-    logInfo("HTTP_REQUEST", {
-      traceId: context.traceId,
-
-      depositId: context.depositId,
-
-      method: "POST",
-
-      endpoint: endpoint.toString(),
-
-      amountCents: input.amountCents,
-    })
-
-    // ========================================
-    // 6. ENVIAR REQUISIÇÃO
-    // ========================================
-
-    const response = await fetch(
-      endpoint.toString(),
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-
-          Accept: "application/json",
-
-          "X-API-Key": apiKey,
-
-          "X-API-Secret": apiSecret,
-
-          "Idempotency-Key":
-            idempotencyKey,
-        },
-
-        body: JSON.stringify(payload),
-
-        signal: controller.signal,
-
-        cache: "no-store",
-
-        redirect: "error",
-      }
-    )
-
-    // ========================================
-    // 7. LER RESPOSTA
-    // ========================================
-
-    const data = await readCajuPayResponse(
-      response,
-      context
-    )
-
-    // ========================================
-    // 8. VALIDAR PAGAMENTO
-    // ========================================
-
-    const payment = validatePixResponse(
-      data
-    )
-
-    // ========================================
-    // 9. LOG DE SUCESSO
-    // ========================================
-
-    logInfo("PIX_CREATED", {
-      traceId: context.traceId,
-
-      depositId: input.depositId,
-
-      paymentId: payment.payment_id,
-
-      status: payment.status,
-
-      hasPixCopyPaste:
-        Boolean(payment.pix_copy_paste),
-
-      hasPixQrCode:
-        Boolean(payment.pix_qr_code),
-
-      durationMs: elapsedMs(
-        context.startedAt
-      ),
-    })
-
-    return payment
-  } catch (error) {
-    // ========================================
-    // 10. ERRO CONHECIDO
-    // ========================================
-
-    if (error instanceof CajuPayError) {
-      logError("CREATE_FAILED", {
-        traceId: context.traceId,
-
-        depositId: input.depositId,
-
-        statusCode: error.statusCode,
-
-        errorCode: error.code,
-
-        message: error.message,
-
-        durationMs: elapsedMs(
-          context.startedAt
-        ),
-      })
-
-      throw error
-    }
-
-    // ========================================
-    // 11. TIMEOUT
-    // ========================================
-
-    if (
-      error instanceof Error &&
-      error.name === "AbortError"
-    ) {
-      logError("TIMEOUT", {
-        traceId: context.traceId,
-
-        depositId: input.depositId,
-
-        timeoutMs: REQUEST_TIMEOUT,
-
-        durationMs: elapsedMs(
-          context.startedAt
-        ),
-      })
-
-      throw new CajuPayError(
-        "Tempo limite de comunicação com a CajuPay.",
-        504,
-        "TIMEOUT"
-      )
-    }
-
-    // ========================================
-    // 12. ERRO DE REDE
-    // ========================================
-
-    logError("NETWORK_ERROR", {
-      traceId: context.traceId,
-
-      depositId: input.depositId,
-
-      errorName:
-        error instanceof Error
-          ? error.name
-          : "UnknownError",
-
-      durationMs: elapsedMs(
-        context.startedAt
-      ),
-    })
-
-    throw new CajuPayError(
-      "Falha de comunicação com a CajuPay.",
-      502,
-      "NETWORK_ERROR"
-    )
-  } finally {
-    clearTimeout(timeout)
-  }
+    paymentId: result.payment_id,
+    status: result.status,
+    hasPixCode: Boolean(result.pix_copy_paste),
+    hasQrCode: Boolean(result.pix_qr_code),
+  });
+
+  return result;
 }
