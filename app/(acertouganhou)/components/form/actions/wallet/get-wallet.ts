@@ -3,9 +3,7 @@
 import { auth } from "@/lib/auth"
 import prisma from "@/lib/prisma"
 
-
-
-export async function getWallet() {
+export async function getPaymentBalance() {
   const session = await auth()
 
   if (!session?.user?.id) {
@@ -15,13 +13,19 @@ export async function getWallet() {
     }
   }
 
-  const wallet = await prisma.wallet.findUnique({
-    where: { userId: session.user.id },
-    select: { balance: true },
+  const account = await prisma.paymentAccount.findUnique({
+    where: {
+      userId: session.user.id,
+    },
+    select: {
+      availableBalance: true,
+      reservedBalance: true,
+    },
   })
 
   return {
     success: true as const,
-    balance: wallet?.balance ?? 0,
+    availableBalance: account?.availableBalance ?? 0,
+    reservedBalance: account?.reservedBalance ?? 0,
   }
 }

@@ -4,12 +4,12 @@ import { auth } from "@/lib/auth"
 import prisma from "@/lib/prisma"
 import { Prisma } from "@/lib/generated/prisma"
 
-import { checkMultiplier } from "@/lib/game/multiplier"
+import { GAME_CONFIG } from "@/lib/game/config"
+import { calculateLatencyCompensation } from "@/lib/game/latency-probe"
 
-export async function stopGame(
-  attemptId: string,
-  clientElapsedMs: number
-) {
+
+export async function stopGame(attemptId: string) {
+  // Registra o recebimento antes da autenticação.
   const receivedAt = new Date()
 
   const session = await auth()
@@ -21,15 +21,10 @@ export async function stopGame(
     }
   }
 
-  if (
-    !attemptId?.trim() ||
-    !Number.isFinite(clientElapsedMs) ||
-    clientElapsedMs < 0 ||
-    clientElapsedMs > 300_000
-  ) {
+  if (!attemptId?.trim()) {
     return {
       success: false as const,
-      error: "Dados da tentativa inválidos.",
+      error: "Tentativa inválida.",
     }
   }
 
@@ -42,7 +37,6 @@ export async function stopGame(
           where: {
             id: attemptId,
             userId,
-            status: "RUNNING",
           },
         })
 
@@ -50,43 +44,84 @@ export async function stopGame(
           throw new Error("INVALID_ATTEMPT")
         }
 
-        // Tempo real medido pelo servidor
-        const serverElapsedMs = Math.max(
+        // Idempotência: nunca recalcula uma tentativa finalizada.
+        if (
+          attempt.status === "WON" ||
+          attempt.status === "LOST"
+        ) {
+          return {
+            status: attempt.status,
+            elapsedMs: attempt.elapsedMs ?? 0,
+            targetMs: attempt.targetMs,
+            multiplier: GAME_CONFIG.multiplier,
+            toleranceMs: GAME_CONFIG.toleranceMs,
+            balance: null,
+          }
+        }
+
+        if (attempt.status !== "RUNNING") {
+          throw new Error("INVALID_ATTEMPT")
+        }
+
+        // Busca medições válidas desta tentativa.
+        const samples = await tx.gameLatencySample.findMany({
+          where: {
+            attemptId: attempt.id,
+            userId,
+            roundTripMs: {
+              gte: 0,
+              lte: GAME_CONFIG.maxAcceptedRttMs,
+            },
+          },
+          select: {
+            roundTripMs: true,
+          },
+          orderBy: {
+            roundTripMs: "asc",
+          },
+          take: GAME_CONFIG.maxLatencySamples,
+        })
+
+        const latencyCompensationMs =
+          calculateLatencyCompensation(
+            samples.map((sample) => sample.roundTripMs)
+          )
+
+        // Tempo real no servidor.
+        const rawRealElapsedMs = Math.max(
           0,
           receivedAt.getTime() -
             attempt.startedAt.getTime()
         )
 
-        // Aplica o fator de velocidade do desafio
+        // Compensação aplicada em milissegundos reais.
+        const adjustedRealElapsedMs = Math.max(
+          0,
+          rawRealElapsedMs - latencyCompensationMs
+        )
+
+        // Converte para o tempo do jogo.
         const elapsedMs = Math.round(
-          (serverElapsedMs * attempt.speedFactor) / 1000
+          (adjustedRealElapsedMs *
+            attempt.speedFactor) /
+            1000
         )
 
-        // Tempo que o navegador informou
-        const reportedElapsedMs = Math.round(
-          clientElapsedMs
+        const differenceMs = Math.abs(
+          elapsedMs - attempt.targetMs
         )
 
-        // Diferença entre o cliente e o servidor
-        const clientDifferenceMs = Math.abs(
-          reportedElapsedMs - elapsedMs
-        )
+        const won =
+          rawRealElapsedMs <=
+            GAME_CONFIG.maxDurationMs +
+              latencyCompensationMs &&
+          differenceMs <= GAME_CONFIG.toleranceMs
 
-        // Tolerância de sincronização.
-        // É diferente da margem para ganhar.
-        const SYNC_TOLERANCE_MS = 500
+        const status = won
+          ? ("WON" as const)
+          : ("LOST" as const)
 
-        if (clientDifferenceMs > SYNC_TOLERANCE_MS) {
-          throw new Error("INVALID_TIME")
-        }
-
-        // Verifica a regra do modo multiplicador
-        const gameResult = checkMultiplier({
-          targetMs: attempt.targetMs,
-          elapsedMs,
-        })
-
-        // Finaliza uma única vez
+        // Atualização condicional.
         const updated = await tx.gameAttempt.updateMany({
           where: {
             id: attempt.id,
@@ -94,7 +129,7 @@ export async function stopGame(
             status: "RUNNING",
           },
           data: {
-            status: gameResult.status,
+            status,
             stoppedAt: receivedAt,
             elapsedMs,
           },
@@ -105,14 +140,17 @@ export async function stopGame(
         }
 
         return {
-          status: gameResult.status,
+          status,
           elapsedMs,
           targetMs: attempt.targetMs,
-          differenceMs: gameResult.differenceMs,
-          toleranceMs: gameResult.toleranceMs,
-          multiplier: gameResult.multiplier,
-
-          // Nenhum crédito é concedido nesta etapa.
+          multiplier: GAME_CONFIG.multiplier,
+          toleranceMs: GAME_CONFIG.toleranceMs,
+          latencyCompensationMs,
+          rawElapsedMs: Math.round(
+            (rawRealElapsedMs *
+              attempt.speedFactor) /
+              1000
+          ),
           balance: null,
         }
       },
@@ -133,36 +171,17 @@ export async function stopGame(
     ) {
       return {
         success: false as const,
-        error: "Conflito ao encerrar. Tente novamente.",
+        error:
+          "Conflito ao finalizar. Consulte novamente.",
       }
     }
 
-    if (error instanceof Error) {
-      if (error.message === "INVALID_TIME") {
-        return {
-          success: false as const,
-          error:
-            "Tempo informado incompatível com a tentativa.",
-        }
-      }
-
-      if (
-        error.message === "INVALID_ATTEMPT" ||
-        error.message === "ALREADY_FINISHED"
-      ) {
-        return {
-          success: false as const,
-          error:
-            "Tentativa inválida ou já finalizada.",
-        }
-      }
-    }
-
-    console.error("Erro ao encerrar jogo:", error)
+    console.error("[STOP_GAME]", error)
 
     return {
       success: false as const,
-      error: "Não foi possível encerrar a tentativa.",
+      error:
+        "Não foi possível confirmar o resultado.",
     }
   }
 }

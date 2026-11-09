@@ -1,17 +1,18 @@
 "use client"
 
 import * as React from "react"
+
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
-import { toast } from "sonner"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 
 import {
   ArrowRight,
-  CheckCircle2,
-  Wallet,
+  Clock3,
   LoaderCircle,
   ShieldCheck,
+  Wallet,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -32,20 +33,46 @@ import {
 
 import { DepositoValores } from "./schema/depositor-valores"
 
-import { addDemoBalance } from "./actions/wallet/add-demo-balance"
+import { PixPayment } from "./pix-payment"
+import { PaymentSuccess } from "./payment-success"
+import { notifyGameWalletUpdated } from "@/lib/wallet-events"
 
-// ======================================================
-// TYPES
-// ======================================================
+
 
 interface FormDepositoProps {
   onClose: () => void
   onSuccess?: () => void
 }
 
-// ======================================================
-// HELPERS
-// ======================================================
+type DepositStep =
+  | "form"
+  | "pix"
+  | "preview"
+  | "success"
+
+interface DepositData {
+  id: string
+  amount: number
+  status: string
+  pixCopyPaste?: string | null
+  expiresAt?: string | null
+}
+
+interface DepositResponse {
+  success: boolean
+  mode?: "PIX" | "PREVIEW"
+  error?: string
+  deposit?: DepositData
+}
+
+interface DepositStatusResponse {
+  success: boolean
+  deposit?: {
+    id: string
+    status: string
+    credited: boolean
+  }
+}
 
 function formatCurrency(value: number) {
   return (value / 100).toLocaleString("pt-BR", {
@@ -55,14 +82,8 @@ function formatCurrency(value: number) {
 }
 
 function parseCurrency(value: string) {
-  const digits = value.replace(/\D/g, "")
-
-  return Number(digits || "0")
+  return Number(value.replace(/\D/g, "") || "0")
 }
-
-// ======================================================
-// COMPONENT
-// ======================================================
 
 export function FormDeposito({
   onClose,
@@ -70,22 +91,28 @@ export function FormDeposito({
 }: FormDepositoProps) {
   const router = useRouter()
 
+  const [step, setStep] =
+    React.useState<DepositStep>("form")
+
   const [loading, setLoading] = React.useState(false)
+
+  const [checkingPayment, setCheckingPayment] =
+    React.useState(false)
+
+  const [deposit, setDeposit] =
+    React.useState<DepositData | null>(null)
+
+  const confirmedRef = React.useRef(false)
+  const checkingRef = React.useRef(false)
 
   const form = useForm<FormSchemaDeposito>({
     resolver: zodResolver(formSchemaDeposito),
-
     defaultValues: {
-      valor: 10000,
+      valor: 1000,
       withOffer: false,
     },
-
     mode: "onChange",
   })
-
-  // ======================================================
-  // FORM VALUES
-  // ======================================================
 
   const valor = form.watch("valor")
   const withOffer = form.watch("withOffer")
@@ -95,88 +122,278 @@ export function FormDeposito({
     valor >= 1000 &&
     valor <= 1000000
 
-  // ======================================================
-  // SUBMIT
-  // ======================================================
+  // =====================================================
+  // CONSULTAR STATUS DO DEPÓSITO
+  // =====================================================
+
+  const checkPayment = React.useCallback(async () => {
+    if (
+      !deposit?.id ||
+      confirmedRef.current ||
+      checkingRef.current
+    ) {
+      return false
+    }
+
+    checkingRef.current = true
+
+    try {
+      const response = await fetch(
+        `/api/payments/deposit/${encodeURIComponent(
+          deposit.id
+        )}`,
+        {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+        }
+      )
+
+      if (!response.ok) {
+        return false
+      }
+
+      const result: DepositStatusResponse =
+        await response.json()
+
+      if (
+        result.success &&
+        result.deposit?.status === "PAID" &&
+        result.deposit.credited
+      ) {
+        if (confirmedRef.current) return true
+
+        confirmedRef.current = true
+
+        setStep("success")
+
+        notifyGameWalletUpdated()
+        router.refresh()
+
+        toast.success("Pagamento confirmado!", {
+          description: "Seu saldo foi atualizado.",
+        })
+
+        onSuccess?.()
+
+        return true
+      }
+
+      return false
+    } catch (error) {
+      console.error("[CHECK_PAYMENT]", error)
+
+      return false
+    } finally {
+      checkingRef.current = false
+    }
+  }, [deposit?.id, router, onSuccess])
+
+  // =====================================================
+  // VERIFICAÇÃO AUTOMÁTICA
+  // =====================================================
+
+  React.useEffect(() => {
+    if (step !== "pix" || !deposit?.id) return
+
+    void checkPayment()
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void checkPayment()
+      }
+    }, 5000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [step, deposit?.id, checkPayment])
+
+  // =====================================================
+  // GERAR PIX
+  // =====================================================
 
   async function onSubmit(data: FormSchemaDeposito) {
     if (loading) return
 
+    setLoading(true)
+
     try {
-      setLoading(true)
+      const response = await fetch(
+        "/api/payments/deposit",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "same-origin",
+          cache: "no-store",
+          body: JSON.stringify({
+            amount: data.valor,
+          }),
+        }
+      )
 
-      // Adiciona créditos fictícios no banco de dados
-      const result = await addDemoBalance(data.valor)
+      const result: DepositResponse =
+        await response.json()
 
-      if (!result.success) {
-        toast.error(result.error || "Erro ao adicionar saldo.")
+      if (
+        !response.ok ||
+        !result.success ||
+        !result.deposit
+      ) {
+        toast.error(
+          result.error ||
+            "Não foi possível gerar o Pix."
+        )
+
         return
       }
 
-      // Notificação
-      toast.success("Saldo demo adicionado!", {
-        description: `${formatCurrency(
-          data.valor
-        )} adicionados à sua carteira fictícia.`,
-        duration: 4000,
-      })
+      confirmedRef.current = false
 
-      // Limpa o formulário
-      form.reset({
-        valor: 10000,
-        withOffer: false,
-      })
+      setDeposit(result.deposit)
 
-      // Atualiza os Server Components
+      if (
+        result.mode === "PIX" &&
+        result.deposit.pixCopyPaste
+      ) {
+        setStep("pix")
+
+        toast.success("Pix gerado com sucesso!")
+      } else {
+        setStep("preview")
+
+        toast.info("Solicitação registrada.")
+      }
+
       router.refresh()
-
-      // Atualiza o saldo no Header
-      onSuccess?.()
-
-      // Fecha o Dialog
-      onClose()
     } catch (error) {
-      console.error("Erro ao adicionar saldo demo:", error)
+      console.error("[CREATE_DEPOSIT]", error)
 
-      toast.error("Não foi possível adicionar saldo.", {
-        description: "Tente novamente em alguns instantes.",
-      })
+      toast.error("Erro ao preparar o depósito.")
     } finally {
       setLoading(false)
     }
   }
 
-  // ======================================================
-  // RENDER
-  // ======================================================
+  // =====================================================
+  // VERIFICAR MANUALMENTE
+  // =====================================================
+
+  async function handleCheckPayment() {
+    if (checkingPayment) return
+
+    setCheckingPayment(true)
+
+    try {
+      const confirmed = await checkPayment()
+
+      if (!confirmed) {
+        toast.info(
+          "Ainda estamos aguardando a confirmação do pagamento."
+        )
+      }
+    } finally {
+      setCheckingPayment(false)
+    }
+  }
+
+  // =====================================================
+  // PAGAMENTO CONFIRMADO
+  // =====================================================
+
+  if (step === "success" && deposit) {
+    return (
+      <PaymentSuccess
+        amount={deposit.amount}
+        onClose={onClose}
+      />
+    )
+  }
+
+  // =====================================================
+  // PIX
+  // =====================================================
+
+  if (
+    step === "pix" &&
+    deposit?.pixCopyPaste
+  ) {
+    return (
+      <PixPayment
+        amount={deposit.amount}
+        pixCopyPaste={deposit.pixCopyPaste}
+        expiresAt={deposit.expiresAt}
+        checkingPayment={checkingPayment}
+        onBack={onClose}
+        onCheckPayment={handleCheckPayment}
+      />
+    )
+  }
+
+  // =====================================================
+  // PREVIEW
+  // =====================================================
+
+  if (step === "preview" && deposit) {
+    return (
+      <div className="mx-auto flex w-full max-w-md flex-col items-center py-8 text-center">
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-amber-400/10">
+          <Clock3 className="size-8 text-amber-300" />
+        </div>
+
+        <h2 className="mt-5 text-2xl font-bold text-white">
+          Solicitação registrada
+        </h2>
+
+        <p className="mt-3 text-sm text-white/50">
+          Sua solicitação foi registrada, mas nenhum
+          código Pix foi disponibilizado.
+        </p>
+
+        <p className="mt-6 text-3xl font-bold text-white">
+          {formatCurrency(deposit.amount)}
+        </p>
+
+        <Button
+          type="button"
+          onClick={onClose}
+          className="mt-8 h-12 w-full rounded-xl bg-[#C8F31D] font-bold text-[#101510]"
+        >
+          Voltar para carteira
+        </Button>
+      </div>
+    )
+  }
+
+  // =====================================================
+  // FORMULÁRIO
+  // =====================================================
 
   return (
-    <div className="w-full max-w-lg">
-      {/* HEADER */}
-      <div className="mb-6 space-y-2">
-        <div className="flex size-12 items-center justify-center rounded-2xl bg-[#C8F31D]/10 text-[#C8F31D]">
-          <Wallet className="size-6" />
+    <div className="mx-auto w-full max-w-md pb-3">
+      <div className="mb-6">
+        <div className="flex size-12 items-center justify-center rounded-2xl border border-[#C8F31D]/15 bg-[#C8F31D]/10">
+          <Wallet className="size-6 text-[#C8F31D]" />
         </div>
 
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">
-            Adicionar saldo
-          </h2>
+        <h2 className="mt-5 text-2xl font-bold tracking-tight text-white">
+          Adicionar saldo
+        </h2>
 
-          <p className="mt-1 text-sm leading-relaxed text-white/50">
-            Escolha um valor para adicionar créditos à sua carteira
-            de demonstração.
-          </p>
-        </div>
+        <p className="mt-2 text-sm text-white/50">
+          Escolha o valor que deseja depositar via Pix.
+        </p>
       </div>
 
-      {/* DEMO BADGE */}
-      
-
-      {/* FORM */}
-      <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
-        <FieldGroup className="gap-6">
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        noValidate
+      >
+        <FieldGroup className="gap-5">
           {/* VALORES PREDEFINIDOS */}
+
           <Controller
             name="valor"
             control={form.control}
@@ -191,6 +408,7 @@ export function FormDeposito({
           />
 
           {/* VALOR PERSONALIZADO */}
+
           <Controller
             name="valor"
             control={form.control}
@@ -223,27 +441,13 @@ export function FormDeposito({
                       }
                     )}
                     onChange={(event) => {
-                      const parsed = parseCurrency(
-                        event.target.value
+                      field.onChange(
+                        parseCurrency(event.target.value)
                       )
-
-                      field.onChange(parsed)
                     }}
                     onBlur={field.onBlur}
                     ref={field.ref}
-                    className="
-                      h-13
-                      rounded-xl
-                      border-white/10
-                      bg-[#171C19]
-                      pl-11
-                      text-base
-                      font-medium
-                      text-white
-                      placeholder:text-white/30
-                      focus-visible:border-[#C8F31D]
-                      focus-visible:ring-[#C8F31D]/20
-                    "
+                    className="h-12 rounded-xl border-white/10 bg-[#171C19] pl-11 text-base text-white"
                   />
                 </div>
 
@@ -252,50 +456,63 @@ export function FormDeposito({
                 </p>
 
                 {fieldState.invalid && (
-                  <FieldError errors={[fieldState.error]} />
+                  <FieldError
+                    errors={[fieldState.error]}
+                  />
                 )}
               </Field>
             )}
           />
 
           {/* RESUMO */}
-          
 
-          {/* BOTÃO */}
+          <div className="rounded-2xl border border-white/10 bg-[#171C19] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-white/50">
+                Valor do depósito
+              </span>
+
+              <span className="text-sm font-semibold text-white">
+                {formatCurrency(valor)}
+              </span>
+            </div>
+
+            <div className="my-4 h-px bg-white/[0.07]" />
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-white">
+                Total
+              </span>
+
+              <span className="text-xl font-bold text-[#C8F31D]">
+                {formatCurrency(valor)}
+              </span>
+            </div>
+          </div>
+
+          {/* SUBMIT */}
+
           <Button
             type="submit"
             isDisabled={loading || !isValidAmount}
-            className="
-              h-13
-              w-full
-              rounded-xl
-              bg-[#C8F31D]
-              text-sm
-              font-bold
-              text-[#101510]
-              transition-all
-              hover:bg-[#B8E31A]
-              active:scale-[0.98]
-              disabled:opacity-50
-            "
+            className="h-12 w-full rounded-xl bg-[#C8F31D] text-sm font-bold text-[#101510] hover:bg-[#B8E31A]"
           >
             {loading ? (
               <>
-                <LoaderCircle className="mr-2 size-5 animate-spin" />
-                Adicionando créditos...
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                Gerando Pix...
               </>
             ) : (
               <>
-                Adicionar {formatCurrency(valor)}
-                <ArrowRight className="ml-2 size-5" />
+                Continuar com {formatCurrency(valor)}
+                <ArrowRight className="ml-2 size-4" />
               </>
             )}
           </Button>
 
-          {/* FOOTER */}
-          <p className="text-center text-[11px] leading-relaxed text-white/30">
-            Os créditos de demonstração não podem ser sacados,
-            transferidos ou convertidos em dinheiro real.
+          <p className="flex items-center justify-center gap-2 text-center text-[11px] leading-relaxed text-white/40">
+            <ShieldCheck className="size-3.5 shrink-0 text-[#C8F31D]" />
+            O saldo será atualizado após a confirmação do Pix.
           </p>
         </FieldGroup>
       </form>

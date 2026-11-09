@@ -1,9 +1,7 @@
-export const WALLET_UPDATED_EVENT = "acertouganhou:wallet-updated"
+export const GAME_WALLET_UPDATED = "game-wallet-updated"
 
-export function notifyWalletUpdated() {
+export function notifyGameWalletUpdated() {
   if (typeof window === "undefined") return
 
-  window.dispatchEvent(
-    new CustomEvent(WALLET_UPDATED_EVENT)
-  )
+  window.dispatchEvent(new Event(GAME_WALLET_UPDATED))
 }

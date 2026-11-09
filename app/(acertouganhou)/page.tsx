@@ -1,4 +1,5 @@
 import { Suspense } from "react"
+import { connection } from "next/server"
 
 import { auth } from "@/lib/auth"
 
@@ -6,7 +7,15 @@ import { HeaderComponents } from "./components/HeaderComponents"
 import { InputPremio } from "./components/InputPremeio"
 import { LaoyutPremios } from "./components/LaoyutPremios"
 
+// =====================================================
+// HEADER — RENDERIZADO POR REQUISIÇÃO
+// =====================================================
+
 async function Header() {
+  // Impede que o auth() seja executado no pré-render.
+  // A autenticação acontece no contexto da requisição.
+  await connection()
+
   const session = await auth()
 
   return (
@@ -17,6 +26,10 @@ async function Header() {
     />
   )
 }
+
+// =====================================================
+// HEADER SKELETON
+// =====================================================
 
 function HeaderSkeleton() {
   return (
@@ -29,6 +42,10 @@ function HeaderSkeleton() {
     </div>
   )
 }
+
+// =====================================================
+// PRÊMIOS SKELETON
+// =====================================================
 
 function PremiosSkeleton() {
   return (
@@ -53,13 +70,19 @@ function PremiosSkeleton() {
   )
 }
 
+// =====================================================
+// PÁGINA PRINCIPAL
+// =====================================================
+
 export default function Page() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-2">
+      {/* HEADER */}
       <Suspense fallback={<HeaderSkeleton />}>
         <Header />
       </Suspense>
 
+      {/* CONTEÚDO */}
       <main className="space-y-10 p-4">
         <InputPremio />
 

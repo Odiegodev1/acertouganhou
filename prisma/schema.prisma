@@ -60,6 +60,11 @@ model User {
   transactions WalletTransaction[]
   claims       PrizeClaim[]
 
+  // Integração financeira
+  paymentAccount     PaymentAccount?
+  paymentDeposits    PaymentDeposit[]
+  paymentWithdrawals PaymentWithdrawal[]
+
   @@map("users")
 }
 
@@ -96,14 +101,14 @@ enum WalletTransactionType {
 }
 
 model WalletTransaction {
-  id          String                @id @default(cuid())
-  userId      String
-  type        WalletTransactionType
-  amount      Int
+  id           String                @id @default(cuid())
+  userId       String
+  type         WalletTransactionType
+  amount       Int
   balanceAfter Int
-  description String?
-  referenceId String?               @unique
-  createdAt   DateTime              @default(now())
+  description  String?
+  referenceId  String?               @unique
+  createdAt    DateTime              @default(now())
 
   user User @relation(fields: [userId], references: [id])
 
@@ -114,31 +119,40 @@ model WalletTransaction {
 // =====================================
 // PRÊMIOS
 // =====================================
+model GameLatencySample {
+  id          String   @id @default(cuid())
+  attemptId   String
+  userId      String
+  roundTripMs Int
+  createdAt   DateTime @default(now())
+
+  @@index([attemptId, userId, createdAt])
+}
 
 model Prize {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
   image       String?
 
   // Valor fictício em centavos
-  value       Int
+  value Int
 
   // Custo da tentativa em centavos fictícios
-  playCost    Int
+  playCost Int
 
   // Tempo-alvo em milissegundos
-  targetMs    Int      @default(5000)
+  targetMs Int @default(5000)
 
   // Velocidade visual em milésimos
   // 1000 = 1x | 1500 = 1,5x | 2000 = 2x
-  speedFactor Int      @default(1500)
+  speedFactor Int @default(1500)
 
-  active      Boolean  @default(true)
-  stock       Int      @default(1)
+  active Boolean @default(true)
+  stock  Int     @default(1)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   attempts GameAttempt[]
   claims   PrizeClaim[]
@@ -158,9 +172,9 @@ enum GameAttemptStatus {
 }
 
 model GameAttempt {
-  id       String @id @default(cuid())
-  userId   String
-  prizeId  String
+  id      String @id @default(cuid())
+  userId  String
+  prizeId String
 
   status GameAttemptStatus @default(RUNNING)
 
@@ -217,4 +231,149 @@ model PrizeClaim {
 
   @@index([userId, createdAt])
   @@map("prize_claims")
+}
+
+// =====================================
+// CONTA FINANCEIRA
+// =====================================
+
+model PaymentAccount {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  // Valores em centavos
+  availableBalance Int @default(0)
+  reservedBalance  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("payment_accounts")
+}
+
+// =====================================
+// DEPÓSITOS PIX
+// =====================================
+
+enum PaymentDepositStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+  CHARGEBACK
+}
+
+model PaymentDeposit {
+  id     String @id @default(cuid())
+  userId String
+
+  // Valor em centavos
+  amount Int
+
+  status PaymentDepositStatus @default(PENDING)
+
+  // Identificadores da SkalaPay
+  providerTransactionId String? @unique
+  providerOrderId       String? @unique
+
+  pixCopyPaste String? @db.Text
+  pixQrCode    String? @db.Text
+
+  expiresAt DateTime?
+  paidAt    DateTime?
+
+  // Impede crédito duplicado
+  creditedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("payment_deposits")
+}
+
+// =====================================
+// SAQUES PIX
+// =====================================
+
+enum PaymentWithdrawalStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+model PaymentWithdrawal {
+  id     String @id @default(cuid())
+  userId String
+
+  // Valor em centavos
+  amount Int
+
+  pixKey     String
+  pixKeyType String
+
+  status PaymentWithdrawalStatus @default(PENDING)
+
+  providerTransactionId String? @unique
+
+  // Identificador único da operação
+  idempotencyKey String @unique
+
+  // Controle de reserva financeira
+  reservedAt DateTime?
+  paidAt     DateTime?
+  failedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("payment_withdrawals")
+}
+
+// =====================================
+// EVENTOS DE WEBHOOK
+// =====================================
+
+enum PaymentWebhookStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+model PaymentWebhookEvent {
+  id String @id @default(cuid())
+
+  provider String @default("SKALAPAY")
+
+  eventType String
+
+  transactionId String?
+  orderId       String?
+
+  // Hash para identificar notificações repetidas
+  eventHash String @unique
+
+  status PaymentWebhookStatus @default(RECEIVED)
+
+  payload Json
+
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([transactionId])
+  @@index([orderId])
+  @@map("payment_webhook_events")
 }

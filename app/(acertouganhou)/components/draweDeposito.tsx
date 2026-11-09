@@ -13,22 +13,18 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer"
 
-import {
-  Wallet,
-  Plus,
-  LoaderCircle,
-} from "lucide-react"
+import { Wallet, Plus, LoaderCircle } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/useIsMobile"
-
 import { FormDeposito } from "./form/formdeposito"
 
-import { getWallet } from "./form/actions/wallet/get-wallet"
 
 import {
-  WALLET_UPDATED_EVENT,
-  notifyWalletUpdated,
-} from "@/lib/wallet-events"
+  GAME_WALLET_UPDATED,
+  notifyGameWalletUpdated,
+} from "@/lib/game/wallet-events"
+import { getGameWalletBalance } from "./form/actions/wallet/get-game"
+
 
 interface DialogDepositoProps {
   open?: boolean
@@ -36,10 +32,10 @@ interface DialogDepositoProps {
   onSuccess?: () => void
 }
 
-function formatCurrency(value: number) {
+function formatCredits(value: number) {
   return (value / 100).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })
 }
 
@@ -51,17 +47,12 @@ export function DialogDeposito({
   const isMobile = useIsMobile()
 
   const [internalOpen, setInternalOpen] = React.useState(false)
-
   const [balance, setBalance] = React.useState<number | null>(null)
-
   const [loading, setLoading] = React.useState(true)
 
   const isControlled = controlledOpen !== undefined
-
   const open = isControlled ? controlledOpen : internalOpen
 
-  // Evita que uma resposta antiga sobrescreva
-  // uma consulta mais recente.
   const requestIdRef = React.useRef(0)
 
   const setOpen = React.useCallback(
@@ -75,11 +66,15 @@ export function DialogDeposito({
     [isControlled, onOpenChange]
   )
 
+  // ==========================================
+  // CONSULTAR SALDO DO JOGO
+  // ==========================================
+
   const loadBalance = React.useCallback(async () => {
     const requestId = ++requestIdRef.current
 
     try {
-      const result = await getWallet()
+      const result = await getGameWalletBalance()
 
       if (requestId !== requestIdRef.current) return
 
@@ -91,7 +86,8 @@ export function DialogDeposito({
     } catch (error) {
       if (requestId !== requestIdRef.current) return
 
-      console.error("Erro ao carregar carteira:", error)
+      console.error("[GAME_BALANCE]", error)
+      setBalance(null)
     } finally {
       if (requestId === requestIdRef.current) {
         setLoading(false)
@@ -99,7 +95,10 @@ export function DialogDeposito({
     }
   }, [])
 
-  // Carregamento inicial.
+  // ==========================================
+  // CARREGAMENTO INICIAL
+  // ==========================================
+
   React.useEffect(() => {
     void loadBalance()
 
@@ -108,33 +107,42 @@ export function DialogDeposito({
     }
   }, [loadBalance])
 
-  // Atualiza quando abrir o Drawer.
+  // ==========================================
+  // ATUALIZAR AO ABRIR
+  // ==========================================
+
   React.useEffect(() => {
     if (!open) return
 
     void loadBalance()
   }, [open, loadBalance])
 
-  // Atualiza após depósitos, jogos e outras movimentações.
+  // ==========================================
+  // ATUALIZAR DEPOIS DE JOGAR
+  // ==========================================
+
   React.useEffect(() => {
-    const handleWalletUpdated = () => {
+    const handleUpdate = () => {
       void loadBalance()
     }
 
     window.addEventListener(
-      WALLET_UPDATED_EVENT,
-      handleWalletUpdated
+      GAME_WALLET_UPDATED,
+      handleUpdate
     )
 
     return () => {
       window.removeEventListener(
-        WALLET_UPDATED_EVENT,
-        handleWalletUpdated
+        GAME_WALLET_UPDATED,
+        handleUpdate
       )
     }
   }, [loadBalance])
 
-  // Atualiza ao voltar para a aba.
+  // ==========================================
+  // ATUALIZAR AO VOLTAR PARA A ABA
+  // ==========================================
+
   React.useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
@@ -159,21 +167,46 @@ export function DialogDeposito({
         handleVisibilityChange
       )
 
-      window.removeEventListener("focus", handleFocus)
+      window.removeEventListener(
+        "focus",
+        handleFocus
+      )
     }
   }, [loadBalance])
 
-  const handleSuccess = React.useCallback(async () => {
-    // Notifica outros componentes que utilizam a carteira.
-    notifyWalletUpdated()
+  // ==========================================
+  // ATUALIZAÇÃO PERIÓDICA
+  // ==========================================
 
-    // Atualiza também este botão.
+  React.useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadBalance()
+      }
+    }, 15000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [loadBalance])
+
+  // ==========================================
+  // DEPÓSITO CONFIRMADO
+  // ==========================================
+
+  const handleSuccess = React.useCallback(async () => {
+    // Atualiza outros componentes que consultam
+    // o saldo financeiro real.
+    notifyGameWalletUpdated()
+
+    // Atualiza a carteira fictícia exibida aqui.
+    // Não transfere dinheiro entre carteiras.
     await loadBalance()
 
     onSuccess?.()
 
-    setOpen(false)
-  }, [loadBalance, onSuccess, setOpen])
+    // Mantém aberto para exibir o sucesso.
+  }, [loadBalance, onSuccess])
 
   return (
     <Drawer
@@ -191,8 +224,7 @@ export function DialogDeposito({
               flex h-10 items-center gap-2
               rounded-full border border-white/10
               bg-[#171C19] px-3
-              text-white
-              transition-all
+              text-white transition-all
               hover:border-[#C8F31D]/30
               hover:bg-[#202820]
               sm:px-4
@@ -200,13 +232,13 @@ export function DialogDeposito({
           >
             <Wallet className="size-4 shrink-0 text-[#C8F31D]" />
 
-            {loading ? (
+            {loading && balance === null ? (
               <LoaderCircle className="size-4 animate-spin text-white/50" />
             ) : (
               <span className="whitespace-nowrap text-xs font-bold sm:text-sm">
                 {balance === null
-                  ? "R$ —"
-                  : formatCurrency(balance)}
+                  ? "—"
+                  : `${formatCredits(balance)} `}
               </span>
             )}
 
@@ -219,25 +251,28 @@ export function DialogDeposito({
 
       <DrawerContent
         className="
-          dark
-          max-h-[95dvh]
-          overflow-y-auto
-          border-white/10
-          bg-[#101510]
-          text-white
+          dark flex max-h-[95dvh] flex-col
+          overflow-hidden border-white/10
+          bg-[#101510] text-white
         "
       >
         <DrawerHeader className="sr-only">
-          <DrawerTitle>
-            Adicionar saldo demo
-          </DrawerTitle>
+          <DrawerTitle>Depositar via Pix</DrawerTitle>
 
           <DrawerDescription>
-            Adicione créditos fictícios à sua carteira.
+            Faça um depósito utilizando Pix.
           </DrawerDescription>
         </DrawerHeader>
 
-        <div className="w-full p-4 sm:p-6">
+        <div
+          className="
+            min-h-0 w-full flex-1
+            overflow-x-hidden overflow-y-auto
+            overscroll-contain px-4 pt-4
+            pb-[max(24px,env(safe-area-inset-bottom))]
+            sm:px-6 sm:py-6
+          "
+        >
           <FormDeposito
             onClose={() => setOpen(false)}
             onSuccess={handleSuccess}

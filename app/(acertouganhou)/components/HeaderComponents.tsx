@@ -20,7 +20,7 @@ import { DraweCadastro } from "./Drawecadastro";
 import { auth } from "@/lib/auth";
 import { DropdownMenuDemo } from "./dropmenuavatar";
 import { DialogDeposito } from "./draweDeposito";
-import { getWallet } from "./form/actions/wallet/get-wallet";
+import { getPaymentBalance } from "./form/actions/wallet/get-wallet";
 
 type PrizeItem = {
   id: number;
@@ -85,10 +85,10 @@ const loadData = useCallback(async () => {
   if (!id) return
 
   try {
-    const result = await getWallet()
+    const result = await getPaymentBalance()
 
     if (result.success) {
-      setBalance(result.balance)
+      setBalance(result.reservedBalance)
     }
   } catch (error) {
     console.error("Erro ao carregar saldo:", error)
