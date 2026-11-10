@@ -177,6 +177,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         paymentId: payment.payment_id,
       });
 
+      await prisma.wallet.upsert({
+        where: { 
+          userId: session?.user?.id 
+        },
+        create: { 
+          balance: deposit.amount,
+          user: {
+            connect: { id: session?.user?.id }
+          }
+        },
+        update: {
+          balance: { increment: deposit.amount } 
+        }
+      });
+      
       // 10. Retornar sucesso
       return NextResponse.json(
         {
@@ -195,9 +210,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         {
           status: 201,
           headers: {
-            "Cache-Control": "no-store",
+            "Cache-Control": "no-store", // Garante que o app não cacheie a resposta do Pix
           },
-        },
+        }
       );
     } catch (error) {
       const definitive =

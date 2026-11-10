@@ -1,9 +1,9 @@
 export const GAME_CONFIG = {
     mode: "MULTIPLIER",
-    multiplier: 3,
+    multiplier: 0,
   
     // Margem de acerto no tempo do jogo.
-    toleranceMs: 250,
+    toleranceMs: 0,
   
     // Tempo máximo real permitido.
     maxDurationMs: 300_000,

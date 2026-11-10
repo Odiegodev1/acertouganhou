@@ -14,20 +14,19 @@ export async function getPaymentBalance() {
   }
 
   try {
-    const account = await prisma.paymentAccount.findUnique({
+    const account = await prisma.wallet.findUnique({
       where: {
         userId: session.user.id,
       },
-      select: {
-        availableBalance: true,
-        reservedBalance: true,
-      },
+      select:{
+        balance: true
+      }
     })
 
     return {
       success: true as const,
-      availableBalance: account?.availableBalance ?? 0,
-      reservedBalance: account?.reservedBalance ?? 0,
+      availableBalance: account?.balance ?? 0,
+      reservedBalance: account?.balance ?? 0,
     }
   } catch (error) {
     console.error("[GET_PAYMENT_BALANCE]", error)
