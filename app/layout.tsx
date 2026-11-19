@@ -68,7 +68,7 @@ export default function RootLayout({
         )}
       >
         {children}
-<Scriptsrc="https://endereco-do-monitor.vercel.app/api/track"strategy="afterInteractive"/> 
+<Script src="https://endereco-do-monitor.vercel.app/api/track" strategy="afterInteractive"/> 
         <CustomToaster />
 
         <Analytics />
